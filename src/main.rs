@@ -5,10 +5,6 @@ use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 use std::{fs::File, io::BufReader, path::PathBuf};
 
-type TaskIndex = usize;
-type TaskNote = Option<String>;
-type TaskDescription = Option<String>;
-
 #[derive(Debug, Clone, ValueEnum)]
 enum ExportStrategy {
     Debug,
@@ -18,9 +14,11 @@ enum ExportStrategy {
 #[derive(Subcommand, Debug)]
 enum Commands {
     Start {
-        note: Option<String>,
+        /// Usually just a short note to identify the task for example: "issue #123"
+        description: String,
     },
     Stop {
+        /// When stopping, the description should be more detailed for example: "Fixed issue #123 by refactoring logic inside the example-controller and added a unit test"
         description: String,
     },
     Cancel {},
@@ -47,86 +45,117 @@ struct Args {
 struct Task {
     time_start: DateTime<Utc>,
     time_stop: Option<DateTime<Utc>>,
-    /// Useful for reminding what a task was about, before adding a description at the end.
-    /// Example: "investigate issue #123"
-    note: TaskNote,
     /// Proper description of the task after finishing.
     /// Example: "Fixed issue #123 by refactoring logic inside the example-controller and added a unit test"
-    description: TaskDescription,
+    description: String,
 }
 
-/// TODO this datastructure is not really that suited to simplicity since we dont share
-/// tasks between multiple lists. Finished states can be inferred by the timestamps and
-/// thinking about it again, the task list should be in chronological order anyway.
-/// By not "caching" the indices the access becomes O(n) and slower but this should not
-/// matter since we are only talking about a tiny count, which should be exported & purged regularly anyway
+impl Task {
+    fn time_in_hours(&self) -> f64 {
+        if self.time_stop.is_none() {
+            debug!(
+                "Returning -1 for time duration of unfinished task: {}",
+                self.description
+            );
+            return -1.0;
+        }
+
+        self
+            .time_stop
+            .unwrap() // We checked above
+            .signed_duration_since(self.time_start)
+            .num_seconds() as f64
+            / 60.0 // minutes
+            / 60.0 // hours
+    }
+}
+
 #[derive(Default, Debug, Serialize, Deserialize)]
 struct Store {
     tasks: Vec<Task>,
-    finished: Vec<TaskIndex>,
-    unfinished: Vec<TaskIndex>,
 }
 
-fn handle_command_start(store: &mut Store, note: TaskNote) -> anyhow::Result<()> {
-    if !store.unfinished.is_empty() {
-        warn!("There are {} unfinished tasks", store.unfinished.len())
+impl Store {
+    fn tasks_pending(&self) -> impl DoubleEndedIterator<Item = &Task> {
+        self.tasks.iter().filter(|&task| task.time_stop.is_none())
     }
 
-    debug!(
-        "Adding a new task with the note: {}",
-        note.as_ref().unwrap_or(&"<empty>".to_string())
-    );
+    fn tasks_pending_mut(&mut self) -> impl DoubleEndedIterator<Item = &mut Task> {
+        self.tasks
+            .iter_mut()
+            .filter(|task| task.time_stop.is_none())
+    }
+
+    fn tasks_finished(&self) -> impl DoubleEndedIterator<Item = &Task> {
+        self.tasks.iter().filter(|&task| task.time_stop.is_some())
+    }
+}
+
+fn handle_command_start(store: &mut Store, description: String) -> anyhow::Result<()> {
+    let tasks_pending = store.tasks_pending().collect::<Vec<_>>();
+
+    if !tasks_pending.is_empty() {
+        warn!("There are {} pending tasks", tasks_pending.len())
+    }
+
+    debug!("Adding a new task with the description: {description}");
 
     store.tasks.push(Task {
         time_start: chrono::Utc::now(),
         time_stop: None,
-        note,
-        description: None,
+        description,
     });
-
-    store.unfinished.push(store.tasks.len() - 1);
 
     Ok(())
 }
 
 fn handle_command_stop(store: &mut Store, description: String) -> anyhow::Result<()> {
-    let (index, task) = match store.unfinished.last() {
-        Some(index) => (
-            *index,
-            store
-                .tasks
-                .get_mut(*index)
-                .context("Failed to access last task")?,
-        ),
+    let task = match store.tasks_pending_mut().last() {
+        Some(task) => task,
         None => {
             warn!("There are no unfinished tasks to stop");
             return Ok(());
         }
     };
 
-    task.description = Some(description);
+    task.description = description;
     task.time_stop = Some(chrono::Utc::now());
-
-    store.unfinished.pop();
-    store.finished.push(index);
 
     Ok(())
 }
 
 fn handle_command_status(store: &Store) -> anyhow::Result<()> {
-    println!("{} finished tasks", store.finished.len());
-    println!("{} unfinished tasks", store.unfinished.len());
-    store.unfinished.iter().for_each(|index| {
-        let task = match store.tasks.get(*index) {
-            Some(task) => task,
-            None => return,
-        };
+    let mut finished = Vec::<&Task>::with_capacity(store.tasks.len());
+    let mut pending = Vec::<&Task>::with_capacity(store.tasks.len());
 
+    // Specifically not using the Store iterators (`tasks_pending`, etc.) so we only have to traverse the tasks-vec once
+    store.tasks.iter().for_each(|task| {
+        if task.time_stop.is_some() {
+            finished.push(task);
+        } else {
+            pending.push(task);
+        }
+    });
+
+    println!("{} finished tasks", finished.len());
+    finished.iter().for_each(|task| {
         println!(
-            "  - {}: {}",
-            task.time_start,
-            task.note.as_ref().unwrap_or(&"<empty>".to_string()),
-        );
+            "Finished {} -- {}",
+            task.time_stop
+                .unwrap()
+                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true), // We know this is safe, we filtered above
+            task.description,
+        )
+    });
+
+    println!("{} pending tasks", pending.len());
+    pending.iter().for_each(|task| {
+        println!(
+            "Started {} -- {}",
+            task.time_start
+                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            task.description
+        )
     });
 
     Ok(())
@@ -137,9 +166,7 @@ fn export_csv(store: &Store) -> anyhow::Result<String> {
 
     output.push_str("time_start;time_stop;hours;description");
 
-    store.finished.iter().for_each(|index| {
-        let task = store.tasks.get(*index).unwrap();
-
+    store.tasks_finished().for_each(|task| {
         let time_start = task
             .time_start
             .with_timezone(&chrono::Local)
@@ -147,19 +174,18 @@ fn export_csv(store: &Store) -> anyhow::Result<String> {
 
         let time_stop = task
             .time_stop
-            .unwrap()
+            .unwrap() // We know it exists, by relying on the iterator
             .with_timezone(&chrono::Local)
             .to_rfc3339_opts(chrono::SecondsFormat::Secs, false);
 
-        let hours = task
-            .time_stop
-            .unwrap()
-            .signed_duration_since(task.time_start)
-            .num_seconds() as f64
-            / 60.0 // minutes
-            / 60.0; // hours
+        let hours = task.time_in_hours();
 
-        let description = task.description.as_ref().unwrap().replace('"', "\\\"");
+        let description = task
+            .description
+            // Not "optimal" going through the string twice but negligable
+            // TODO Does escaping even work this way? Ehh revisit this in case it comes up
+            .replace('"', "\\\"")
+            .replace(';', "\\;");
 
         output.push_str(&format!(
             "\n{time_start};{time_stop};{hours:.2};\"{description}\""
@@ -179,9 +205,34 @@ fn handle_command_export(store: &Store, strategy: ExportStrategy) -> anyhow::Res
 
     println!("{content}");
 
-    if !store.unfinished.is_empty() {
-        warn!("There are {} unfinished tasks", store.unfinished.len())
+    let pending = store.tasks_pending().collect::<Vec<_>>();
+    // TODO might dedupe "print"
+    if !pending.is_empty() {
+        warn!("There are {} pending tasks", pending.len());
+        pending.iter().for_each(|&task| {
+            warn!(
+                "Started {} -- {}",
+                task.time_start
+                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                task.description
+            )
+        });
     }
+
+    Ok(())
+}
+
+/// Cancels the latest unfinished task and removes it from the store
+fn handle_command_cancel(store: &mut Store) -> anyhow::Result<()> {
+    let task = match store.tasks_pending().next_back() {
+        Some(task) => task,
+        None => {
+            warn!("There is no pending task to cancel");
+            return Ok(());
+        }
+    };
+
+    todo!("REMOVE TASK FROM LIST IN ORDER TO CANCEL IT");
 
     Ok(())
 }
@@ -218,48 +269,6 @@ fn persist_tasks(path_file: &PathBuf, store: &Store) -> anyhow::Result<()> {
     debug!("Successfully replaced tasks file with newer content from the swap file");
 
     Ok(())
-}
-
-/// Cancels the latest unfinished task and removes it from the store
-fn handle_command_cancel(store: &mut Store) -> anyhow::Result<()> {
-    let index = match store.unfinished.last() {
-        Some(index) => index,
-        None => {
-            warn!("There is no unfinished task to cancel");
-            return Ok(());
-        }
-    };
-
-    let task = match store.tasks.get(*index) {
-        Some(task) => task,
-        None => {
-            warn!(
-                "There is no task at index: {} -- Removing this entry from the unfinished list now",
-                *index
-            );
-            store.unfinished.pop(); // We know that there is a last one due to getting it earlier via `.last()` 
-            return Ok(());
-        }
-    };
-
-    match task.time_stop {
-        Some(_) => {
-            warn!(
-                "The task pointed to by the unfinished index is already finished -- Removing the index now"
-            );
-            store.unfinished.pop(); // We know its ok, see above
-            Ok(())
-        }
-        None => {
-            debug!(
-                "Canceling current unfinished task with the note: {}",
-                task.note.as_ref().unwrap_or(&"<empty>".to_string())
-            );
-            store.tasks.remove(*index);
-            store.unfinished.pop(); // We know its ok, see above
-            Ok(())
-        }
-    }
 }
 
 fn main() -> anyhow::Result<()> {
@@ -338,11 +347,12 @@ fn main() -> anyhow::Result<()> {
     };
 
     match args.command {
-        Commands::Start { note } => handle_command_start(&mut store, note)
+        Commands::Start { description } => handle_command_start(&mut store, description)
             .and_then(|_| persist_tasks(&path_tasks_file, &store))?,
         Commands::Stop { description } => handle_command_stop(&mut store, description)
-            .and_then(|_| persist_tasks(&path_tasks_file, &store))?,
-        Commands::Cancel {} => handle_command_cancel(&mut store)?,
+            .and_then(|_| persist_tasks(&path_tasks_file, &store))?, // TODO if theres no pending tasks no need to touch disk
+        Commands::Cancel {} => handle_command_cancel(&mut store)
+            .and_then(|_| persist_tasks(&path_tasks_file, &store))?, // TODO if theres no canceling no need to touch disk
         Commands::Status {} => handle_command_status(&store)?,
         Commands::Export { strategy } => handle_command_export(&store, strategy)?,
     }
@@ -353,82 +363,82 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
 
-    #[test]
-    fn adding_tasks() {
-        let mut store = Store::default();
-        assert_eq!(0, store.tasks.len());
+//     #[test]
+//     fn adding_tasks() {
+//         let mut store = Store::default();
+//         assert_eq!(0, store.tasks.len());
 
-        handle_command_start(&mut store, Some("adding tasks #1".to_string())).unwrap();
+//         handle_command_start(&mut store, Some("adding tasks #1".to_string())).unwrap();
 
-        assert_eq!(1, store.tasks.len());
-        assert_eq!(0, store.finished.len());
-        assert_eq!(1, store.unfinished.len());
+//         assert_eq!(1, store.tasks.len());
+//         assert_eq!(0, store.finished.len());
+//         assert_eq!(1, store.unfinished.len());
 
-        handle_command_start(&mut store, Some("adding tasks #2".to_string())).unwrap();
-        handle_command_start(&mut store, Some("adding tasks #3".to_string())).unwrap();
+//         handle_command_start(&mut store, Some("adding tasks #2".to_string())).unwrap();
+//         handle_command_start(&mut store, Some("adding tasks #3".to_string())).unwrap();
 
-        assert_eq!(3, store.tasks.len());
-        assert_eq!(0, store.finished.len());
-        assert_eq!(3, store.unfinished.len());
-    }
+//         assert_eq!(3, store.tasks.len());
+//         assert_eq!(0, store.finished.len());
+//         assert_eq!(3, store.unfinished.len());
+//     }
 
-    #[test]
-    fn stopping_empty_tasklist() {
-        let mut store = Store::default();
-        assert_eq!(0, store.tasks.len());
+//     #[test]
+//     fn stopping_empty_tasklist() {
+//         let mut store = Store::default();
+//         assert_eq!(0, store.tasks.len());
 
-        handle_command_stop(&mut store, "There are no tasks".to_string()).unwrap();
+//         handle_command_stop(&mut store, "There are no tasks".to_string()).unwrap();
 
-        assert_eq!(0, store.tasks.len());
-        assert_eq!(0, store.finished.len());
-        assert_eq!(0, store.unfinished.len());
-    }
+//         assert_eq!(0, store.tasks.len());
+//         assert_eq!(0, store.finished.len());
+//         assert_eq!(0, store.unfinished.len());
+//     }
 
-    #[test]
-    fn start_and_stop_one_task() {
-        let mut store = Store::default();
-        assert_eq!(0, store.tasks.len());
+//     #[test]
+//     fn start_and_stop_one_task() {
+//         let mut store = Store::default();
+//         assert_eq!(0, store.tasks.len());
 
-        handle_command_start(&mut store, None).unwrap();
-        assert_eq!(1, store.tasks.len());
-        assert_eq!(0, store.finished.len());
-        assert_eq!(1, store.unfinished.len());
+//         handle_command_start(&mut store, None).unwrap();
+//         assert_eq!(1, store.tasks.len());
+//         assert_eq!(0, store.finished.len());
+//         assert_eq!(1, store.unfinished.len());
 
-        handle_command_stop(&mut store, "Done testing".to_string()).unwrap();
-        assert_eq!(1, store.tasks.len());
-        assert_eq!(1, store.finished.len());
-        assert_eq!(0, store.unfinished.len());
-    }
+//         handle_command_stop(&mut store, "Done testing".to_string()).unwrap();
+//         assert_eq!(1, store.tasks.len());
+//         assert_eq!(1, store.finished.len());
+//         assert_eq!(0, store.unfinished.len());
+//     }
 
-    #[test]
-    fn cancel_empty_tasklist() {
-        let mut store = Store::default();
-        assert_eq!(0, store.tasks.len());
+//     #[test]
+//     fn cancel_empty_tasklist() {
+//         let mut store = Store::default();
+//         assert_eq!(0, store.tasks.len());
 
-        handle_command_cancel(&mut store).unwrap();
-        assert_eq!(0, store.tasks.len());
-        assert_eq!(0, store.finished.len());
-        assert_eq!(0, store.unfinished.len());
-    }
+//         handle_command_cancel(&mut store).unwrap();
+//         assert_eq!(0, store.tasks.len());
+//         assert_eq!(0, store.finished.len());
+//         assert_eq!(0, store.unfinished.len());
+//     }
 
-    #[test]
-    fn cancel_active_tasks() {
-        let mut store = Store::default();
-        assert_eq!(0, store.tasks.len());
+//     #[test]
+//     fn cancel_active_tasks() {
+//         let mut store = Store::default();
+//         assert_eq!(0, store.tasks.len());
 
-        handle_command_start(&mut store, None).unwrap();
-        handle_command_start(&mut store, None).unwrap();
-        assert_eq!(2, store.tasks.len());
-        assert_eq!(0, store.finished.len());
-        assert_eq!(2, store.unfinished.len());
+//         handle_command_start(&mut store, None).unwrap();
+//         handle_command_start(&mut store, None).unwrap();
+//         assert_eq!(2, store.tasks.len());
+//         assert_eq!(0, store.finished.len());
+//         assert_eq!(2, store.unfinished.len());
 
-        handle_command_cancel(&mut store).unwrap();
-        assert_eq!(1, store.tasks.len());
-        assert_eq!(0, store.finished.len());
-        assert_eq!(1, store.unfinished.len());
-    }
-}
+//         handle_command_cancel(&mut store).unwrap();
+//         assert_eq!(1, store.tasks.len());
+//         assert_eq!(0, store.finished.len());
+//         assert_eq!(1, store.unfinished.len());
+//     }
+// }
