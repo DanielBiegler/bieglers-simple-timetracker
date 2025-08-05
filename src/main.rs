@@ -229,17 +229,20 @@ fn handle_command_export(store: &Store, strategy: ExportStrategy) -> anyhow::Res
 
 /// Cancels the latest unfinished task and removes it from the store
 fn handle_command_cancel(store: &mut Store) -> anyhow::Result<StoreModified> {
-    let task = match store.tasks_pending().next_back() {
-        Some(task) => task,
-        None => {
-            warn!("There is no pending task to cancel");
-            return Ok(StoreModified::No);
-        }
-    };
+    for (index, task) in store.tasks.iter().enumerate().rev() {
+        if task.time_stop.is_some() {
+            continue;
+        };
 
-    todo!("REMOVE TASK FROM LIST IN ORDER TO CANCEL IT");
+        debug!(
+            "Canceling task at index: {index}, description: {}",
+            task.description
+        );
+        store.tasks.remove(index);
+        return Ok(StoreModified::Yes);
+    }
 
-    Ok(StoreModified::Yes)
+    Ok(StoreModified::No)
 }
 
 fn persist_tasks(path_file: &PathBuf, store: &Store) -> anyhow::Result<()> {
@@ -377,82 +380,78 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-//     #[test]
-//     fn adding_tasks() {
-//         let mut store = Store::default();
-//         assert_eq!(0, store.tasks.len());
+    #[test]
+    fn adding_tasks() {
+        let mut store = Store::default();
+        assert_eq!(0, store.tasks.len());
 
-//         handle_command_start(&mut store, Some("adding tasks #1".to_string())).unwrap();
+        handle_command_start(&mut store, "#1".to_string()).unwrap();
+        assert_eq!(1, store.tasks.len());
+        assert_eq!(1, store.tasks_pending().count());
+        assert_eq!(0, store.tasks_finished().count());
 
-//         assert_eq!(1, store.tasks.len());
-//         assert_eq!(0, store.finished.len());
-//         assert_eq!(1, store.unfinished.len());
+        handle_command_start(&mut store, "#2".to_string()).unwrap();
+        handle_command_start(&mut store, "#3".to_string()).unwrap();
+        assert_eq!(3, store.tasks.len());
+        assert_eq!(3, store.tasks_pending().count());
+        assert_eq!(0, store.tasks_finished().count());
+    }
 
-//         handle_command_start(&mut store, Some("adding tasks #2".to_string())).unwrap();
-//         handle_command_start(&mut store, Some("adding tasks #3".to_string())).unwrap();
+    #[test]
+    fn stopping_empty_tasklist() {
+        let mut store = Store::default();
+        assert_eq!(0, store.tasks.len());
 
-//         assert_eq!(3, store.tasks.len());
-//         assert_eq!(0, store.finished.len());
-//         assert_eq!(3, store.unfinished.len());
-//     }
+        handle_command_stop(&mut store, "There are no tasks".to_string()).unwrap();
+        assert_eq!(0, store.tasks.len());
+    }
 
-//     #[test]
-//     fn stopping_empty_tasklist() {
-//         let mut store = Store::default();
-//         assert_eq!(0, store.tasks.len());
+    #[test]
+    fn start_and_stop_one_task() {
+        let mut store = Store::default();
+        assert_eq!(0, store.tasks.len());
 
-//         handle_command_stop(&mut store, "There are no tasks".to_string()).unwrap();
+        handle_command_start(&mut store, "Start test".to_string()).unwrap();
+        assert_eq!(1, store.tasks.len());
+        assert_eq!(1, store.tasks_pending().count());
+        assert_eq!(0, store.tasks_finished().count());
 
-//         assert_eq!(0, store.tasks.len());
-//         assert_eq!(0, store.finished.len());
-//         assert_eq!(0, store.unfinished.len());
-//     }
+        handle_command_stop(&mut store, "Done testing".to_string()).unwrap();
+        assert_eq!(1, store.tasks.len());
+        assert_eq!(0, store.tasks_pending().count());
+        assert_eq!(1, store.tasks_finished().count());
+    }
 
-//     #[test]
-//     fn start_and_stop_one_task() {
-//         let mut store = Store::default();
-//         assert_eq!(0, store.tasks.len());
+    #[test]
+    fn cancel_empty_tasklist() {
+        let mut store = Store::default();
+        assert_eq!(0, store.tasks.len());
 
-//         handle_command_start(&mut store, None).unwrap();
-//         assert_eq!(1, store.tasks.len());
-//         assert_eq!(0, store.finished.len());
-//         assert_eq!(1, store.unfinished.len());
+        handle_command_cancel(&mut store).unwrap();
+        assert_eq!(0, store.tasks.len());
+        assert_eq!(0, store.tasks_pending().count());
+        assert_eq!(0, store.tasks_finished().count());
+    }
 
-//         handle_command_stop(&mut store, "Done testing".to_string()).unwrap();
-//         assert_eq!(1, store.tasks.len());
-//         assert_eq!(1, store.finished.len());
-//         assert_eq!(0, store.unfinished.len());
-//     }
+    #[test]
+    fn cancel_active_tasks() {
+        let mut store = Store::default();
+        assert_eq!(0, store.tasks.len());
 
-//     #[test]
-//     fn cancel_empty_tasklist() {
-//         let mut store = Store::default();
-//         assert_eq!(0, store.tasks.len());
+        handle_command_start(&mut store, "#1".to_string()).unwrap();
+        handle_command_start(&mut store, "#2".to_string()).unwrap();
+        assert_eq!(2, store.tasks.len());
+        assert_eq!(2, store.tasks_pending().count());
+        assert_eq!(0, store.tasks_finished().count());
 
-//         handle_command_cancel(&mut store).unwrap();
-//         assert_eq!(0, store.tasks.len());
-//         assert_eq!(0, store.finished.len());
-//         assert_eq!(0, store.unfinished.len());
-//     }
-
-//     #[test]
-//     fn cancel_active_tasks() {
-//         let mut store = Store::default();
-//         assert_eq!(0, store.tasks.len());
-
-//         handle_command_start(&mut store, None).unwrap();
-//         handle_command_start(&mut store, None).unwrap();
-//         assert_eq!(2, store.tasks.len());
-//         assert_eq!(0, store.finished.len());
-//         assert_eq!(2, store.unfinished.len());
-
-//         handle_command_cancel(&mut store).unwrap();
-//         assert_eq!(1, store.tasks.len());
-//         assert_eq!(0, store.finished.len());
-//         assert_eq!(1, store.unfinished.len());
-//     }
-// }
+        handle_command_cancel(&mut store).unwrap();
+        assert_eq!(1, store.tasks.len());
+        assert_eq!(1, store.tasks_pending().count());
+        assert_eq!(0, store.tasks_finished().count());
+        assert_eq!("#1", store.tasks_pending().next().unwrap().description);
+    }
+}
