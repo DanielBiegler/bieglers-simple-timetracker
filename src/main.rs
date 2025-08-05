@@ -1,9 +1,14 @@
-use anyhow::{Context, bail};
+use anyhow::Context;
 use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand, ValueEnum};
 use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 use std::{fs::File, io::BufReader, path::PathBuf};
+
+enum StoreModified {
+    Yes,
+    No,
+}
 
 #[derive(Debug, Clone, ValueEnum)]
 enum ExportStrategy {
@@ -109,19 +114,19 @@ fn handle_command_start(store: &mut Store, description: String) -> anyhow::Resul
     Ok(())
 }
 
-fn handle_command_stop(store: &mut Store, description: String) -> anyhow::Result<()> {
+fn handle_command_stop(store: &mut Store, description: String) -> anyhow::Result<StoreModified> {
     let task = match store.tasks_pending_mut().last() {
         Some(task) => task,
         None => {
             warn!("There are no unfinished tasks to stop");
-            return Ok(());
+            return Ok(StoreModified::No);
         }
     };
 
     task.description = description;
     task.time_stop = Some(chrono::Utc::now());
 
-    Ok(())
+    Ok(StoreModified::Yes)
 }
 
 fn handle_command_status(store: &Store) -> anyhow::Result<()> {
@@ -223,18 +228,18 @@ fn handle_command_export(store: &Store, strategy: ExportStrategy) -> anyhow::Res
 }
 
 /// Cancels the latest unfinished task and removes it from the store
-fn handle_command_cancel(store: &mut Store) -> anyhow::Result<()> {
+fn handle_command_cancel(store: &mut Store) -> anyhow::Result<StoreModified> {
     let task = match store.tasks_pending().next_back() {
         Some(task) => task,
         None => {
             warn!("There is no pending task to cancel");
-            return Ok(());
+            return Ok(StoreModified::No);
         }
     };
 
     todo!("REMOVE TASK FROM LIST IN ORDER TO CANCEL IT");
 
-    Ok(())
+    Ok(StoreModified::Yes)
 }
 
 fn persist_tasks(path_file: &PathBuf, store: &Store) -> anyhow::Result<()> {
@@ -349,10 +354,19 @@ fn main() -> anyhow::Result<()> {
     match args.command {
         Commands::Start { description } => handle_command_start(&mut store, description)
             .and_then(|_| persist_tasks(&path_tasks_file, &store))?,
-        Commands::Stop { description } => handle_command_stop(&mut store, description)
-            .and_then(|_| persist_tasks(&path_tasks_file, &store))?, // TODO if theres no pending tasks no need to touch disk
-        Commands::Cancel {} => handle_command_cancel(&mut store)
-            .and_then(|_| persist_tasks(&path_tasks_file, &store))?, // TODO if theres no canceling no need to touch disk
+
+        Commands::Stop { description } => match handle_command_stop(&mut store, description) {
+            Ok(StoreModified::Yes) => persist_tasks(&path_tasks_file, &store),
+            Ok(StoreModified::No) => Ok(()),
+            Err(e) => return Err(e),
+        }?,
+
+        Commands::Cancel {} => match handle_command_cancel(&mut store) {
+            Ok(StoreModified::Yes) => persist_tasks(&path_tasks_file, &store),
+            Ok(StoreModified::No) => Ok(()),
+            Err(e) => return Err(e),
+        }?,
+
         Commands::Status {} => handle_command_status(&store)?,
         Commands::Export { strategy } => handle_command_export(&store, strategy)?,
     }
