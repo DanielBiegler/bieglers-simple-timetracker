@@ -147,7 +147,7 @@ fn export_csv(store: &Store) -> anyhow::Result<String> {
         let description = task.description.as_ref().unwrap().replace('"', "\\\"");
 
         output.push_str(&format!(
-            "\n{time_start};{time_stop};{hours};\"{description}\""
+            "\n{time_start};{time_stop};{hours:.2};\"{description}\""
         ));
     });
 
