@@ -1,4 +1,4 @@
-use anyhow::Context;
+use anyhow::{Context, bail};
 use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand, ValueEnum};
 use log::{debug, warn};
@@ -23,6 +23,7 @@ enum Commands {
     Stop {
         description: String,
     },
+    Cancel {},
     Status {},
     Export {
         #[arg(value_enum, default_value_t = ExportStrategy::Debug)]
@@ -54,6 +55,11 @@ struct Task {
     description: TaskDescription,
 }
 
+/// TODO this datastructure is not really that suited to simplicity since we dont share
+/// tasks between multiple lists. Finished states can be inferred by the timestamps and
+/// thinking about it again, the task list should be in chronological order anyway.
+/// By not "caching" the indices the access becomes O(n) and slower but this should not
+/// matter since we are only talking about a tiny count, which should be exported & purged regularly anyway
 #[derive(Default, Debug, Serialize, Deserialize)]
 struct Store {
     tasks: Vec<Task>,
@@ -193,7 +199,7 @@ fn persist_tasks(path_file: &PathBuf, store: &Store) -> anyhow::Result<()> {
 
     debug!("Created file: {}", path_swap.display());
 
-    serde_json::to_writer(file_swap, store)
+    serde_json::to_writer_pretty(file_swap, store)
         .with_context(|| format!("Failed serializing to file: {}", path_swap.display()))?;
 
     debug!(
@@ -212,6 +218,48 @@ fn persist_tasks(path_file: &PathBuf, store: &Store) -> anyhow::Result<()> {
     debug!("Successfully replaced tasks file with newer content from the swap file");
 
     Ok(())
+}
+
+/// Cancels the latest unfinished task and removes it from the store
+fn handle_command_cancel(store: &mut Store) -> anyhow::Result<()> {
+    let index = match store.unfinished.last() {
+        Some(index) => index,
+        None => {
+            warn!("There is no unfinished task to cancel");
+            return Ok(());
+        }
+    };
+
+    let task = match store.tasks.get(*index) {
+        Some(task) => task,
+        None => {
+            warn!(
+                "There is no task at index: {} -- Removing this entry from the unfinished list now",
+                *index
+            );
+            store.unfinished.pop(); // We know that there is a last one due to getting it earlier via `.last()` 
+            return Ok(());
+        }
+    };
+
+    match task.time_stop {
+        Some(_) => {
+            warn!(
+                "The task pointed to by the unfinished index is already finished -- Removing the index now"
+            );
+            store.unfinished.pop(); // We know its ok, see above
+            Ok(())
+        }
+        None => {
+            debug!(
+                "Canceling current unfinished task with the note: {}",
+                task.note.as_ref().unwrap_or(&"<empty>".to_string())
+            );
+            store.tasks.remove(*index);
+            store.unfinished.pop(); // We know its ok, see above
+            Ok(())
+        }
+    }
 }
 
 fn main() -> anyhow::Result<()> {
@@ -294,6 +342,7 @@ fn main() -> anyhow::Result<()> {
             .and_then(|_| persist_tasks(&path_tasks_file, &store))?,
         Commands::Stop { description } => handle_command_stop(&mut store, description)
             .and_then(|_| persist_tasks(&path_tasks_file, &store))?,
+        Commands::Cancel {} => handle_command_cancel(&mut store)?,
         Commands::Status {} => handle_command_status(&store)?,
         Commands::Export { strategy } => handle_command_export(&store, strategy)?,
     }
@@ -302,4 +351,84 @@ fn main() -> anyhow::Result<()> {
     debug!("Finished in {}ms", time_stop_program.as_millis());
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn adding_tasks() {
+        let mut store = Store::default();
+        assert_eq!(0, store.tasks.len());
+
+        handle_command_start(&mut store, Some("adding tasks #1".to_string())).unwrap();
+
+        assert_eq!(1, store.tasks.len());
+        assert_eq!(0, store.finished.len());
+        assert_eq!(1, store.unfinished.len());
+
+        handle_command_start(&mut store, Some("adding tasks #2".to_string())).unwrap();
+        handle_command_start(&mut store, Some("adding tasks #3".to_string())).unwrap();
+
+        assert_eq!(3, store.tasks.len());
+        assert_eq!(0, store.finished.len());
+        assert_eq!(3, store.unfinished.len());
+    }
+
+    #[test]
+    fn stopping_empty_tasklist() {
+        let mut store = Store::default();
+        assert_eq!(0, store.tasks.len());
+
+        handle_command_stop(&mut store, "There are no tasks".to_string()).unwrap();
+
+        assert_eq!(0, store.tasks.len());
+        assert_eq!(0, store.finished.len());
+        assert_eq!(0, store.unfinished.len());
+    }
+
+    #[test]
+    fn start_and_stop_one_task() {
+        let mut store = Store::default();
+        assert_eq!(0, store.tasks.len());
+
+        handle_command_start(&mut store, None).unwrap();
+        assert_eq!(1, store.tasks.len());
+        assert_eq!(0, store.finished.len());
+        assert_eq!(1, store.unfinished.len());
+
+        handle_command_stop(&mut store, "Done testing".to_string()).unwrap();
+        assert_eq!(1, store.tasks.len());
+        assert_eq!(1, store.finished.len());
+        assert_eq!(0, store.unfinished.len());
+    }
+
+    #[test]
+    fn cancel_empty_tasklist() {
+        let mut store = Store::default();
+        assert_eq!(0, store.tasks.len());
+
+        handle_command_cancel(&mut store).unwrap();
+        assert_eq!(0, store.tasks.len());
+        assert_eq!(0, store.finished.len());
+        assert_eq!(0, store.unfinished.len());
+    }
+
+    #[test]
+    fn cancel_active_tasks() {
+        let mut store = Store::default();
+        assert_eq!(0, store.tasks.len());
+
+        handle_command_start(&mut store, None).unwrap();
+        handle_command_start(&mut store, None).unwrap();
+        assert_eq!(2, store.tasks.len());
+        assert_eq!(0, store.finished.len());
+        assert_eq!(2, store.unfinished.len());
+
+        handle_command_cancel(&mut store).unwrap();
+        assert_eq!(1, store.tasks.len());
+        assert_eq!(0, store.finished.len());
+        assert_eq!(1, store.unfinished.len());
+    }
 }
