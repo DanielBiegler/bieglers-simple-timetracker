@@ -172,13 +172,35 @@ fn handle_command_export(store: &Store, strategy: ExportStrategy) -> anyhow::Res
 }
 
 fn persist_tasks(path_file: &PathBuf, store: &Store) -> anyhow::Result<()> {
-    let file = File::create(path_file)
-        .with_context(|| format!("Failed creating file: {}", path_file.display()))?;
-    debug!("Created/Overwrote file: {}", path_file.display());
+    let time = chrono::Utc::now().timestamp_micros();
 
-    serde_json::to_writer(file, store)
-        .with_context(|| format!("Failed serializing to file: {}", path_file.display()))?;
-    debug!("Serialized tasks file to disk: {}", path_file.display());
+    let path_swap = path_file
+        .parent()
+        .context("Invalid directory for saving swap file")?
+        .join(format!(".__{time}_swap_tasks.json"));
+
+    let file_swap = File::create(&path_swap)
+        .with_context(|| format!("Failed creating swap file: {}", path_swap.display()))?;
+
+    debug!("Created/Overwrote file: {}", path_swap.display());
+
+    serde_json::to_writer(file_swap, store)
+        .with_context(|| format!("Failed serializing to file: {}", path_swap.display()))?;
+
+    debug!(
+        "Serialized swap tasks file to disk: {}",
+        path_swap.display()
+    );
+
+    std::fs::rename(&path_swap, path_file).with_context(|| {
+        format!(
+            "Failed overwriting tasks file \"{}\" with the new content of the swap file \"{}\". Do not run the program again until you resolve this issue, otherwise adding or removing tasks will result in loss of data. Replace the contents of the tasks file with the newer content of the swap file manually.",
+            path_file.display(),
+            path_swap.display()
+        )
+    })?;
+
+    debug!("Successfully replaced tasks file with newer content from the swap file");
 
     Ok(())
 }
