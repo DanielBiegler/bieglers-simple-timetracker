@@ -62,6 +62,15 @@ struct Store {
 }
 
 fn handle_command_start(store: &mut Store, note: TaskNote) -> anyhow::Result<()> {
+    if !store.unfinished.is_empty() {
+        warn!("There are {} unfinished tasks", store.unfinished.len())
+    }
+
+    debug!(
+        "Adding a new task with the note: {}",
+        note.as_ref().unwrap_or(&"<empty>".to_string())
+    );
+
     store.tasks.push(Task {
         time_start: chrono::Utc::now(),
         time_stop: None,
@@ -182,7 +191,7 @@ fn persist_tasks(path_file: &PathBuf, store: &Store) -> anyhow::Result<()> {
     let file_swap = File::create(&path_swap)
         .with_context(|| format!("Failed creating swap file: {}", path_swap.display()))?;
 
-    debug!("Created/Overwrote file: {}", path_swap.display());
+    debug!("Created file: {}", path_swap.display());
 
     serde_json::to_writer(file_swap, store)
         .with_context(|| format!("Failed serializing to file: {}", path_swap.display()))?;
