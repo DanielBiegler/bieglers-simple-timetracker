@@ -24,35 +24,51 @@ enum StoreModified {
 
 #[derive(Debug, Clone, ValueEnum)]
 enum ExportStrategy {
+    /// Default output for sanity checking when debugging
     Debug,
+    /// Comma separated values, useful for importing into worksheets/tables
     Csv,
+    /// JavaScript Object Notation, useful for as an intermediary for example `jq`
+    Json,
 }
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    /// Start working on something. Creates a new pending task if there is none.
     Start {
-        /// Usually just a short note to identify the task for example: "issue #123"
+        /// Usually just a short note to identify the task for example: "Begin work on issue #123"
         description: String,
     },
+    /// Stop the pending task.
     Stop {},
-    /// Cancels i.e. removes the latest added pending task
+    /// Cancels i.e. removes the pending task.
     Cancel {},
-    /// Clears i.e. removes all tasks from the store. Does not modify the store if there are pending tasks.
+    /// Clears i.e. removes all finished tasks from the store. Does not modify the store if there are pending tasks.
     Clear {},
+    /// Print human readable information about finished and pending tasks.
     Status {},
+    /// Generate output for integrating into other tools.
     Export {
         #[arg(value_enum, default_value_t = ExportStrategy::Csv)]
         strategy: ExportStrategy,
     },
 }
 
-/// Stupid simple personal time tracker
+/// Purposefully Stupid-Simple Personal Time-Tracker made by and for Daniel Biegler https://www.danielbiegler.de
 #[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
+#[command(version, about)]
 struct Args {
-    /// Name of the output folder. Persistence will be inside your current directory.
-    #[arg(long, default_value = ".bieglers-timetracker")]
+    /// Name of the output folder. Persistence will be inside this directory.
+    #[arg(short, long, default_value = ".bieglers-timetracker")]
     output: PathBuf,
+
+    /// Level of feedback for your inputs. Gets output into `stderr` so you can still have logs and output into a file normally.
+    ///
+    /// Environment variable `$RUST_LOG` takes precedence and overwrites this argument.
+    ///
+    /// For possible values see https://docs.rs/env_logger/0.11.8/env_logger/index.html
+    #[arg(long, default_value = "info")]
+    log_level: String,
 
     #[command(subcommand)]
     command: Commands,
@@ -166,6 +182,8 @@ fn handle_command_export(store: &Store, strategy: ExportStrategy) -> anyhow::Res
     let content = match strategy {
         ExportStrategy::Debug => format!("{store:#?}"),
         ExportStrategy::Csv => export_csv(store)?,
+        // TODO
+        ExportStrategy::Json => format!("{store:#?}"),
     };
 
     if store.finished.is_empty() {
@@ -255,8 +273,9 @@ fn persist_tasks(path_file: &PathBuf, store: &Store) -> anyhow::Result<()> {
 
 fn main() -> anyhow::Result<()> {
     let time_start_program = std::time::Instant::now();
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let args = Args::parse();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(args.log_level))
+        .init();
 
     if !args.output.is_dir() {
         debug!("Output path does not exist");
