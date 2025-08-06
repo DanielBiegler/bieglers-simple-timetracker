@@ -28,16 +28,6 @@ impl TaskPending {
         self.notes.push(note);
     }
 
-    /// Since we may assert the existance of at minimum one `TaskNote`, duration is infallible.<br>
-    /// If there is only one note, start and end will be the same and the duration equals zero.
-    pub fn duration_in_hours(&self) -> f64 {
-        duration_in_hours(&self.time_start(), &self.time_end())
-    }
-
-    pub fn iter_notes(&self) -> impl ExactSizeIterator<Item = &TaskNote> {
-        self.notes.iter()
-    }
-
     /// Opinionated string for convenient printing
     pub fn human_readable(&self) -> String {
         format!(
@@ -46,20 +36,12 @@ impl TaskPending {
                 .with_timezone(&chrono::Local)
                 .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
             duration_in_hours(&self.time_start(), &Utc::now()),
-            self.iter_notes()
+            self.notes
+                .iter()
                 .map(|note| { note.description.clone() })
                 .collect::<Vec<_>>()
                 .join("\n    - "),
         )
-    }
-
-    /// Joins all descriptions in order (by cloning) separated by a space
-    fn join_descriptions(&self) -> String {
-        self.notes
-            .iter()
-            .map(|n| n.description.clone())
-            .collect::<Vec<_>>()
-            .join(" ")
     }
 }
 
@@ -73,31 +55,38 @@ pub struct TaskNote {
 pub struct TaskFinished {
     pub time_start: DateTime<Utc>,
     pub time_stop: DateTime<Utc>,
-    /// Proper description of the task after finishing.
-    pub description: String,
+    notes: Vec<TaskNote>,
 }
 
 impl TaskFinished {
     /// Opinionated string for convenient printing
     pub fn human_readable(&self) -> String {
         format!(
-            "Finished at {}, took {:.2}h, description: {}",
+            "Finished at {}, took {:.2}h, description:\n    - {}",
             self.time_stop
                 .with_timezone(&chrono::Local)
                 .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
             duration_in_hours(&self.time_start, &self.time_stop),
-            self.description
+            self.notes
+                .iter()
+                .map(|note| { note.description.clone() })
+                .collect::<Vec<_>>()
+                .join("\n    - "),
         )
+    }
+
+    /// Iterator for going over this tasks notes
+    pub fn iter_notes(&self) -> impl ExactSizeIterator<Item = &TaskNote> {
+        self.notes.iter()
     }
 }
 
-// TODO think about just providing a function like ".finish" -> TaskFinished
-impl From<&TaskPending> for TaskFinished {
-    fn from(value: &TaskPending) -> Self {
+impl From<TaskPending> for TaskFinished {
+    fn from(value: TaskPending) -> Self {
         Self {
             time_start: value.time_start(),
             time_stop: value.time_end(),
-            description: value.join_descriptions(),
+            notes: value.notes,
         }
     }
 }

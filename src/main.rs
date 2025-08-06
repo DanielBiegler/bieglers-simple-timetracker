@@ -74,8 +74,15 @@ struct Args {
     command: Commands,
 }
 
+#[derive(Debug, Serialize, Deserialize, Default)]
+enum StoreVersion {
+    #[default]
+    V1,
+}
+
 #[derive(Default, Debug, Serialize, Deserialize)]
 struct Store {
+    version: StoreVersion,
     /// By forcing only one pending task I want to encourage focus and chronological order of time passing
     pending: Option<TaskPending>,
     finished: Vec<TaskFinished>,
@@ -121,22 +128,20 @@ fn handle_command_note(store: &mut Store, description: String) -> anyhow::Result
 }
 
 fn handle_command_stop(store: &mut Store) -> anyhow::Result<StoreModified> {
-    let pending = match &store.pending {
-        Some(task) => task,
+    let finished: TaskFinished = match store.pending.take() {
+        Some(task) => TaskFinished::from(task),
         None => {
             warn!("Stopping did nothing because there is no pending task");
             return Ok(StoreModified::No);
         }
     };
 
-    let finished = TaskFinished::from(pending);
-
     info!(
         "Finished pending task, took {:.2}h",
         duration_in_hours(&finished.time_start, &finished.time_stop)
     );
 
-    store.pending = None;
+    // store.pending = None; // Not needed due to earlier `.take()`
     store.finished.push(finished);
     Ok(StoreModified::Yes)
 }
@@ -181,11 +186,19 @@ fn export_csv(store: &Store) -> anyhow::Result<String> {
         let hours = duration_in_hours(&task.time_start, &task.time_stop);
 
         let description = task
-            .description
-            // Not "optimal" going through the string twice but negligable
-            // TODO Does escaping even work this way? Ehh revisit this in case it comes up
-            .replace('"', "\\\"")
-            .replace(';', "\\;");
+            .iter_notes()
+            .map(|t| {
+                format!(
+                    "- {}",
+                    t.description
+                        // Not "optimal" going through the string twice but negligable
+                        // TODO Does escaping even work this way? Ehh revisit this in case it comes up
+                        .replace('"', "\\\"")
+                        .replace(';', "\\;")
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
 
         output.push_str(&format!(
             "\n{time_start};{time_stop};{hours:.2};\"{description}\""
@@ -201,6 +214,7 @@ fn handle_command_export(store: &Store, strategy: ExportStrategy) -> anyhow::Res
     let content = match strategy {
         ExportStrategy::Debug => format!("{store:#?}"),
         ExportStrategy::Csv => export_csv(store)?,
+        // Including computed fields like hours would probably be nice. Do that once the need comes up.
         ExportStrategy::Json => serde_json::to_string_pretty::<Vec<_>>(&store.finished)?,
     };
 
