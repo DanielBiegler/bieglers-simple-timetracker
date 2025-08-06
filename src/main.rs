@@ -58,24 +58,10 @@ struct Task {
     description: String,
 }
 
-impl Task {
-    fn time_in_hours(&self) -> f64 {
-        if self.time_stop.is_none() {
-            debug!(
-                "Returning -1 for time duration of unfinished task: {}",
-                self.description
-            );
-            return -1.0;
-        }
-
-        self
-            .time_stop
-            .unwrap() // We checked above
-            .signed_duration_since(self.time_start)
-            .num_seconds() as f64
+fn duration_in_hours(start: DateTime<Utc>, end: DateTime<Utc>) -> f64 {
+    end.signed_duration_since(start).num_seconds() as f64
             / 60.0 // minutes
             / 60.0 // hours
-    }
 }
 
 #[derive(Default, Debug, Serialize, Deserialize)]
@@ -148,7 +134,10 @@ fn handle_command_stop(store: &mut Store, description: String) -> anyhow::Result
     task.description = description;
     task.time_stop = Some(chrono::Utc::now());
 
-    info!("Took time: {:.2}h", task.time_in_hours());
+    info!(
+        "Took time: {:.2}h",
+        duration_in_hours(task.time_start, task.time_stop.unwrap())
+    );
 
     Ok(StoreModified::Yes)
 }
@@ -174,7 +163,7 @@ fn handle_command_status(store: &Store) -> anyhow::Result<()> {
                 .unwrap()
                 .with_timezone(&chrono::Local)
                 .to_rfc3339_opts(chrono::SecondsFormat::Secs, true), // We know this is safe, we filtered above
-            task.time_in_hours(),
+            duration_in_hours(task.time_start, task.time_stop.unwrap()),
             task.description,
         )
     });
@@ -182,10 +171,11 @@ fn handle_command_status(store: &Store) -> anyhow::Result<()> {
     println!("{} pending tasks", pending.len());
     pending.iter().for_each(|task| {
         println!(
-            "Started {} -- {}",
+            "Started {} -- Is taking {:.2}h -- {}",
             task.time_start
                 .with_timezone(&chrono::Local)
                 .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            duration_in_hours(task.time_start, chrono::Utc::now()),
             task.description
         )
     });
@@ -210,7 +200,7 @@ fn export_csv(store: &Store) -> anyhow::Result<String> {
             .with_timezone(&chrono::Local)
             .to_rfc3339_opts(chrono::SecondsFormat::Secs, false);
 
-        let hours = task.time_in_hours();
+        let hours = duration_in_hours(task.time_start, task.time_stop.unwrap());
 
         let description = task
             .description
@@ -537,5 +527,28 @@ mod tests {
         assert_eq!(0, store.tasks.len());
         assert_eq!(0, store.tasks_pending().count());
         assert_eq!(0, store.tasks_finished().count());
+    }
+}
+
+#[cfg(test)]
+mod helpers {
+    use crate::duration_in_hours;
+
+    #[test]
+    fn duration_same_start_end() {
+        let time = chrono::Utc::now();
+        let result = duration_in_hours(time, time);
+        assert_eq!(0.00, result);
+    }
+
+    #[test]
+    fn duration_end_before_start() {
+        let start = chrono::Utc::now();
+        let end = chrono::Utc::now()
+            .checked_sub_signed(chrono::TimeDelta::hours(1))
+            .unwrap();
+
+        let result = duration_in_hours(start, end).round();
+        assert_eq!(-1.0, result);
     }
 }
