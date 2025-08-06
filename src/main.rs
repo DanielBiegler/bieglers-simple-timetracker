@@ -1,14 +1,17 @@
 use anyhow::Context;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use clap::{Parser, Subcommand, ValueEnum};
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::{fs::File, io::BufReader, path::PathBuf};
 
-// Moved types to module so that we can restrict construction
-mod tasks;
+mod helpers;
+mod tasks; // Moved types to tasks-module so that we can restrict construction
 
-use crate::tasks::{TaskFinished, TaskNote, TaskPending};
+use crate::{
+    helpers::duration_in_hours,
+    tasks::{TaskFinished, TaskNote, TaskPending},
+};
 
 enum StoreModified {
     Yes,
@@ -43,18 +46,12 @@ enum Commands {
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// Name of the output folder. Persistence will be inside your HOME folder. Example: /home/user/.timetracker
+    /// Name of the output folder. Persistence will be inside your current directory.
     #[arg(long, default_value = ".bieglers-timetracker")]
     output: PathBuf,
 
     #[command(subcommand)]
     command: Commands,
-}
-
-fn duration_in_hours(start: &DateTime<Utc>, end: &DateTime<Utc>) -> f64 {
-    end.signed_duration_since(start).num_seconds() as f64
-            / 60.0 // minutes
-            / 60.0 // hours
 }
 
 #[derive(Default, Debug, Serialize, Deserialize)]
@@ -110,35 +107,17 @@ fn handle_command_status(store: &Store) -> anyhow::Result<()> {
         println!("No finished tasks")
     } else {
         println!("{} finished tasks", store.finished.len());
-        store.finished.iter().for_each(|task| {
-            println!(
-                "Finished task at {} -- Took {:.2}h -- {}",
-                task.time_stop
-                    .with_timezone(&chrono::Local)
-                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true), // We know this is safe, we filtered above
-                duration_in_hours(&task.time_start, &task.time_stop),
-                task.description,
-            )
-        });
+        store
+            .finished
+            .iter()
+            .for_each(|task| println!("{}", task.human_readable()));
     }
+
+    println!();
 
     match &store.pending {
         None => println!("No pending task"),
-        Some(pending) => {
-            println!(
-                "Pending task:\nStarted at {}, is taking {:.2}h, notes:\n    - {}",
-                pending
-                    .time_start()
-                    .with_timezone(&chrono::Local)
-                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-                duration_in_hours(&pending.time_start(), &Utc::now()),
-                pending
-                    .iter_notes()
-                    .map(|note| { note.description.clone() })
-                    .collect::<Vec<_>>()
-                    .join("\n    - "),
-            );
-        }
+        Some(pending) => println!("{}", pending.human_readable()),
     }
 
     Ok(())
@@ -275,25 +254,18 @@ fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let args = Args::parse();
 
-    let output_name = args
-        .output
-        .file_name()
-        .context("Failed to get file name for output folder")?;
-    let home = dirs::home_dir().context("Failed to infer the home folder")?;
-    let path_output = home.join(output_name);
-
-    if !path_output.is_dir() {
+    if !args.output.is_dir() {
         debug!("Output path does not exist");
-        std::fs::create_dir(&path_output).with_context(|| {
+        std::fs::create_dir(&args.output).with_context(|| {
             format!(
                 "Failed to create output directory: {}",
-                path_output.display()
+                args.output.display()
             )
         })?;
-        debug!("Created output directory: {}", path_output.display());
+        debug!("Created output directory: {}", args.output.display());
     }
 
-    let path_tasks_file = path_output.join("tasks.json");
+    let path_tasks_file = args.output.join("tasks.json");
     debug!("Determined output file to: {}", path_tasks_file.display());
 
     let mut store: Store = match File::open(&path_tasks_file)
@@ -487,39 +459,5 @@ fn main() -> anyhow::Result<()> {
 //         assert_eq!(0, store.finished.len());
 //         assert_eq!(0, store.tasks_pending().count());
 //         assert_eq!(0, store.tasks_finished().count());
-//     }
-// }
-
-// #[cfg(test)]
-// mod helpers {
-//     use crate::duration_in_hours;
-
-//     #[test]
-//     fn duration_same_start_end() {
-//         let time = chrono::Utc::now();
-//         let result = duration_in_hours(time, time);
-//         assert_eq!(0.00, result);
-//     }
-
-//     #[test]
-//     fn duration_end_before_start() {
-//         let start = chrono::Utc::now();
-//         let end = chrono::Utc::now()
-//             .checked_sub_signed(chrono::TimeDelta::hours(1))
-//             .unwrap();
-
-//         let result = duration_in_hours(start, end).round();
-//         assert_eq!(-1.0, result);
-//     }
-
-//     #[test]
-//     fn duration_took_90minutes() {
-//         let start = chrono::Utc::now();
-//         let end = chrono::Utc::now()
-//             .checked_add_signed(chrono::TimeDelta::minutes(90))
-//             .unwrap();
-
-//         let result = duration_in_hours(start, end);
-//         assert_eq!(1.5, result);
 //     }
 // }
