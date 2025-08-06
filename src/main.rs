@@ -1,7 +1,7 @@
 use anyhow::Context;
 use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand, ValueEnum};
-use log::{debug, warn};
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::{fs::File, io::BufReader, path::PathBuf};
 
@@ -26,10 +26,13 @@ enum Commands {
         /// When stopping, the description should be more detailed for example: "Fixed issue #123 by refactoring logic inside the example-controller and added a unit test"
         description: String,
     },
+    /// Cancels i.e. removes the latest added pending task
     Cancel {},
+    /// Clears i.e. removes all tasks from the store. Does not modify the store if there are pending tasks.
+    Clear {},
     Status {},
     Export {
-        #[arg(value_enum, default_value_t = ExportStrategy::Debug)]
+        #[arg(value_enum, default_value_t = ExportStrategy::Csv)]
         strategy: ExportStrategy,
     },
 }
@@ -94,16 +97,31 @@ impl Store {
     fn tasks_finished(&self) -> impl DoubleEndedIterator<Item = &Task> {
         self.tasks.iter().filter(|&task| task.time_stop.is_some())
     }
+
+    fn warn_about_pending_tasks(&self) {
+        self.tasks_pending().for_each(|task| {
+            warn!(
+                "Pending task started {} -- {}",
+                task.time_start
+                    .with_timezone(&chrono::Local)
+                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                task.description
+            )
+        });
+    }
 }
 
-fn handle_command_start(store: &mut Store, description: String) -> anyhow::Result<()> {
-    let tasks_pending = store.tasks_pending().collect::<Vec<_>>();
-
-    if !tasks_pending.is_empty() {
-        warn!("There are {} pending tasks", tasks_pending.len())
+/// Starts a new task
+///
+/// Returns early and does not modify the store if there is already a pending task
+fn handle_command_start(store: &mut Store, description: String) -> anyhow::Result<StoreModified> {
+    if store.tasks_pending().next_back().is_some() {
+        store.warn_about_pending_tasks();
+        error!(
+            "There are pending tasks! Finish or cancel your current task before starting a new one."
+        );
+        return Ok(StoreModified::No);
     }
-
-    debug!("Adding a new task with the description: {description}");
 
     store.tasks.push(Task {
         time_start: chrono::Utc::now(),
@@ -111,7 +129,9 @@ fn handle_command_start(store: &mut Store, description: String) -> anyhow::Resul
         description,
     });
 
-    Ok(())
+    info!("Started a new task");
+
+    Ok(StoreModified::Yes)
 }
 
 fn handle_command_stop(store: &mut Store, description: String) -> anyhow::Result<StoreModified> {
@@ -123,8 +143,12 @@ fn handle_command_stop(store: &mut Store, description: String) -> anyhow::Result
         }
     };
 
+    info!("Finishing pending task: {}", task.description);
+
     task.description = description;
     task.time_stop = Some(chrono::Utc::now());
+
+    info!("Took time: {:.2}h", task.time_in_hours());
 
     Ok(StoreModified::Yes)
 }
@@ -145,10 +169,12 @@ fn handle_command_status(store: &Store) -> anyhow::Result<()> {
     println!("{} finished tasks", finished.len());
     finished.iter().for_each(|task| {
         println!(
-            "Finished {} -- {}",
+            "Finished {} -- Took {:.2}h -- {}",
             task.time_stop
                 .unwrap()
+                .with_timezone(&chrono::Local)
                 .to_rfc3339_opts(chrono::SecondsFormat::Secs, true), // We know this is safe, we filtered above
+            task.time_in_hours(),
             task.description,
         )
     });
@@ -158,6 +184,7 @@ fn handle_command_status(store: &Store) -> anyhow::Result<()> {
         println!(
             "Started {} -- {}",
             task.time_start
+                .with_timezone(&chrono::Local)
                 .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
             task.description
         )
@@ -208,21 +235,14 @@ fn handle_command_export(store: &Store, strategy: ExportStrategy) -> anyhow::Res
         ExportStrategy::Csv => export_csv(store)?,
     };
 
+    if store.tasks.is_empty() {
+        warn!("Exporting did nothing because there are no tasks");
+        return Ok(());
+    }
+
     println!("{content}");
 
-    let pending = store.tasks_pending().collect::<Vec<_>>();
-    // TODO might dedupe "print"
-    if !pending.is_empty() {
-        warn!("There are {} pending tasks", pending.len());
-        pending.iter().for_each(|&task| {
-            warn!(
-                "Started {} -- {}",
-                task.time_start
-                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-                task.description
-            )
-        });
-    }
+    store.warn_about_pending_tasks();
 
     Ok(())
 }
@@ -234,7 +254,7 @@ fn handle_command_cancel(store: &mut Store) -> anyhow::Result<StoreModified> {
             continue;
         };
 
-        debug!(
+        info!(
             "Canceling task at index: {index}, description: {}",
             task.description
         );
@@ -243,6 +263,26 @@ fn handle_command_cancel(store: &mut Store) -> anyhow::Result<StoreModified> {
     }
 
     Ok(StoreModified::No)
+}
+
+/// Clears all finished tasks from the store
+///
+/// Returns early and does not modify the store if there are pending tasks
+fn handle_command_clear(store: &mut Store) -> anyhow::Result<StoreModified> {
+    if store.tasks_pending().next_back().is_some() {
+        store.warn_about_pending_tasks();
+        error!("There are pending tasks! You must finish or cancel them before you can clear.");
+        return Ok(StoreModified::No);
+    }
+
+    if store.tasks.is_empty() {
+        warn!("Clearing did nothing because there are no tasks");
+        return Ok(StoreModified::No);
+    }
+
+    store.tasks = Default::default();
+    info!("Cleared the task store");
+    Ok(StoreModified::Yes)
 }
 
 fn persist_tasks(path_file: &PathBuf, store: &Store) -> anyhow::Result<()> {
@@ -355,8 +395,11 @@ fn main() -> anyhow::Result<()> {
     };
 
     match args.command {
-        Commands::Start { description } => handle_command_start(&mut store, description)
-            .and_then(|_| persist_tasks(&path_tasks_file, &store))?,
+        Commands::Start { description } => match handle_command_start(&mut store, description) {
+            Ok(StoreModified::Yes) => persist_tasks(&path_tasks_file, &store),
+            Ok(StoreModified::No) => Ok(()),
+            Err(e) => return Err(e),
+        }?,
 
         Commands::Stop { description } => match handle_command_stop(&mut store, description) {
             Ok(StoreModified::Yes) => persist_tasks(&path_tasks_file, &store),
@@ -365,6 +408,12 @@ fn main() -> anyhow::Result<()> {
         }?,
 
         Commands::Cancel {} => match handle_command_cancel(&mut store) {
+            Ok(StoreModified::Yes) => persist_tasks(&path_tasks_file, &store),
+            Ok(StoreModified::No) => Ok(()),
+            Err(e) => return Err(e),
+        }?,
+
+        Commands::Clear {} => match handle_command_clear(&mut store) {
             Ok(StoreModified::Yes) => persist_tasks(&path_tasks_file, &store),
             Ok(StoreModified::No) => Ok(()),
             Err(e) => return Err(e),
@@ -395,9 +444,8 @@ mod tests {
         assert_eq!(0, store.tasks_finished().count());
 
         handle_command_start(&mut store, "#2".to_string()).unwrap();
-        handle_command_start(&mut store, "#3".to_string()).unwrap();
-        assert_eq!(3, store.tasks.len());
-        assert_eq!(3, store.tasks_pending().count());
+        assert_eq!(1, store.tasks.len());
+        assert_eq!(1, store.tasks_pending().count());
         assert_eq!(0, store.tasks_finished().count());
     }
 
@@ -443,15 +491,50 @@ mod tests {
         assert_eq!(0, store.tasks.len());
 
         handle_command_start(&mut store, "#1".to_string()).unwrap();
-        handle_command_start(&mut store, "#2".to_string()).unwrap();
-        assert_eq!(2, store.tasks.len());
-        assert_eq!(2, store.tasks_pending().count());
-        assert_eq!(0, store.tasks_finished().count());
-
-        handle_command_cancel(&mut store).unwrap();
         assert_eq!(1, store.tasks.len());
         assert_eq!(1, store.tasks_pending().count());
         assert_eq!(0, store.tasks_finished().count());
-        assert_eq!("#1", store.tasks_pending().next().unwrap().description);
+
+        handle_command_cancel(&mut store).unwrap();
+        assert_eq!(0, store.tasks.len());
+        assert_eq!(0, store.tasks_pending().count());
+        assert_eq!(0, store.tasks_finished().count());
+    }
+
+    #[test]
+    fn clearing_fails_due_to_pending_task() {
+        let mut store = Store::default();
+        assert_eq!(0, store.tasks.len());
+
+        handle_command_start(&mut store, "#1".to_string()).unwrap();
+        assert_eq!(1, store.tasks.len());
+        assert_eq!(1, store.tasks_pending().count());
+        assert_eq!(0, store.tasks_finished().count());
+
+        handle_command_clear(&mut store).unwrap();
+        assert_eq!(1, store.tasks.len());
+        assert_eq!(1, store.tasks_pending().count());
+        assert_eq!(0, store.tasks_finished().count());
+    }
+
+    #[test]
+    fn clearing_finished_tasks() {
+        let mut store = Store::default();
+        assert_eq!(0, store.tasks.len());
+
+        handle_command_start(&mut store, "#1".to_string()).unwrap();
+        assert_eq!(1, store.tasks.len());
+        assert_eq!(1, store.tasks_pending().count());
+        assert_eq!(0, store.tasks_finished().count());
+
+        handle_command_stop(&mut store, "#1 Done".to_string()).unwrap();
+        assert_eq!(1, store.tasks.len());
+        assert_eq!(0, store.tasks_pending().count());
+        assert_eq!(1, store.tasks_finished().count());
+
+        handle_command_clear(&mut store).unwrap();
+        assert_eq!(0, store.tasks.len());
+        assert_eq!(0, store.tasks_pending().count());
+        assert_eq!(0, store.tasks_finished().count());
     }
 }
