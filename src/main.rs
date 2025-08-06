@@ -115,7 +115,7 @@ fn handle_command_start(store: &mut Store, description: String) -> anyhow::Resul
 }
 
 fn handle_command_stop(store: &mut Store, description: String) -> anyhow::Result<StoreModified> {
-    let task = match store.tasks_pending_mut().last() {
+    let task = match store.tasks_pending_mut().next_back() {
         Some(task) => task,
         None => {
             warn!("There are no unfinished tasks to stop");
