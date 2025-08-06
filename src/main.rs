@@ -3,7 +3,11 @@ use chrono::Utc;
 use clap::{Parser, Subcommand, ValueEnum};
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
-use std::{fs::File, io::BufReader, path::PathBuf};
+use std::{
+    fs::File,
+    io::{BufReader, Write},
+    path::PathBuf,
+};
 
 mod helpers;
 mod tasks; // Moved types to tasks-module so that we can restrict construction
@@ -265,6 +269,7 @@ fn main() -> anyhow::Result<()> {
         debug!("Created output directory: {}", args.output.display());
     }
 
+    let path_gitignore_file = args.output.join(".gitignore");
     let path_tasks_file = args.output.join("tasks.json");
     debug!("Determined output file to: {}", path_tasks_file.display());
 
@@ -308,6 +313,28 @@ fn main() -> anyhow::Result<()> {
                 debug!(
                     "Serialized a new tasks file to disk: {}",
                     path_tasks_file.display()
+                );
+
+                let mut file_new_gitignore =
+                    File::create_new(&path_gitignore_file).with_context(|| {
+                        format!(
+                            "Failed creating new .gitignore file at: {}",
+                            path_gitignore_file.display()
+                        )
+                    })?;
+
+                debug!(
+                    "Created a new .gitignore file: {}",
+                    path_gitignore_file.display()
+                );
+
+                file_new_gitignore
+                    .write_all(b"*")
+                    .context("Failed writing content into .gitignore file")?;
+
+                debug!(
+                    "Wrote content to new .gitignore file: {}",
+                    path_gitignore_file.display()
                 );
 
                 store
