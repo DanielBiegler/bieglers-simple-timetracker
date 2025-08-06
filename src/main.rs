@@ -182,8 +182,7 @@ fn handle_command_export(store: &Store, strategy: ExportStrategy) -> anyhow::Res
     let content = match strategy {
         ExportStrategy::Debug => format!("{store:#?}"),
         ExportStrategy::Csv => export_csv(store)?,
-        // TODO
-        ExportStrategy::Json => format!("{store:#?}"),
+        ExportStrategy::Json => serde_json::to_string_pretty::<Vec<_>>(&store.finished)?,
     };
 
     if store.finished.is_empty() {
@@ -193,9 +192,8 @@ fn handle_command_export(store: &Store, strategy: ExportStrategy) -> anyhow::Res
 
     println!("{content}");
 
-    if store.pending.is_some() {
-        warn!("There is a pending task");
-        // TODO print pending task
+    if let Some(pending) = &store.pending {
+        warn!("There is a pending task: {}", pending.human_readable())
     }
 
     Ok(())
@@ -220,8 +218,8 @@ fn handle_command_cancel(store: &mut Store) -> anyhow::Result<StoreModified> {
 ///
 /// Returns early and does not modify the store if there is a pending task
 fn handle_command_clear(store: &mut Store) -> anyhow::Result<StoreModified> {
-    if store.pending.is_some() {
-        // TODO print task
+    if let Some(pending) = &store.pending {
+        warn!("There is a pending task: {}", pending.human_readable());
         error!("There is a pending task! You must finish or cancel it before you can clear.");
         return Ok(StoreModified::No);
     }
