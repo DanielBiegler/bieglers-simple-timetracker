@@ -551,4 +551,15 @@ mod helpers {
         let result = duration_in_hours(start, end).round();
         assert_eq!(-1.0, result);
     }
+
+    #[test]
+    fn duration_took_90minutes() {
+        let start = chrono::Utc::now();
+        let end = chrono::Utc::now()
+            .checked_add_signed(chrono::TimeDelta::minutes(90))
+            .unwrap();
+
+        let result = duration_in_hours(start, end);
+        assert_eq!(1.5, result);
+    }
 }
