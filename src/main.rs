@@ -138,7 +138,7 @@ fn handle_command_stop(store: &mut Store, description: String) -> anyhow::Result
     let task = match store.tasks_pending_mut().next_back() {
         Some(task) => task,
         None => {
-            warn!("There are no unfinished tasks to stop");
+            warn!("Stopping did nothing because there are no pending tasks");
             return Ok(StoreModified::No);
         }
     };
@@ -262,6 +262,7 @@ fn handle_command_cancel(store: &mut Store) -> anyhow::Result<StoreModified> {
         return Ok(StoreModified::Yes);
     }
 
+    warn!("Canceling did nothing because there are no pending tasks");
     Ok(StoreModified::No)
 }
 
