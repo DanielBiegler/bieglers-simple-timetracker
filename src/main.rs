@@ -35,15 +35,15 @@ enum ExportStrategy {
 #[derive(Subcommand, Debug)]
 enum Commands {
     /// Start working on something. Creates a new pending task if there is none.
-    Start {
-        /// Usually just a short note to identify the task for example: "Begin work on issue #123"
-        description: String,
-    },
+    /// Usually accompanied by a short note to identify the task for example: "Begin work on issue #123"
+    Start { description: String },
+    /// Add a note to the pending task.
+    Note { description: String },
     /// Stop the pending task.
     Stop {},
     /// Cancels i.e. removes the pending task.
     Cancel {},
-    /// Clears i.e. removes all finished tasks from the store. Does not modify the store if there are pending tasks.
+    /// Clears i.e. removes all finished tasks from the store. Does not modify the store if there is a pending task.
     Clear {},
     /// Print human readable information about finished and pending tasks.
     Status {},
@@ -99,6 +99,25 @@ fn handle_command_start(store: &mut Store, description: String) -> anyhow::Resul
 
     info!("Started a new task");
     Ok(StoreModified::Yes)
+}
+
+fn handle_command_note(store: &mut Store, description: String) -> anyhow::Result<StoreModified> {
+    match store.pending.as_mut() {
+        None => {
+            warn!("Adding a note did nothing because there is no pending task");
+            Ok(StoreModified::No)
+        }
+        Some(pending) => {
+            pending.note_push(TaskNote {
+                time: Utc::now(),
+                description,
+            });
+
+            info!("Added note to pending task");
+
+            Ok(StoreModified::Yes)
+        }
+    }
 }
 
 fn handle_command_stop(store: &mut Store) -> anyhow::Result<StoreModified> {
@@ -269,12 +288,8 @@ fn persist_tasks(path_file: &PathBuf, store: &Store) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn main() -> anyhow::Result<()> {
-    let time_start_program = std::time::Instant::now();
-    let args = Args::parse();
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(args.log_level))
-        .init();
-
+/// Just a helper to keep the main function tidy and focused.
+fn init_local_files_and_store(args: &Args) -> anyhow::Result<(Store, PathBuf)> {
     if !args.output.is_dir() {
         debug!("Output path does not exist");
         std::fs::create_dir(&args.output).with_context(|| {
@@ -290,7 +305,7 @@ fn main() -> anyhow::Result<()> {
     let path_tasks_file = args.output.join("tasks.json");
     debug!("Determined output file to: {}", path_tasks_file.display());
 
-    let mut store: Store = match File::open(&path_tasks_file)
+    let store: Store = match File::open(&path_tasks_file)
         .with_context(|| format!("Failed to read tasks file: {}", path_tasks_file.display()))
     {
         Ok(file) => {
@@ -361,8 +376,25 @@ fn main() -> anyhow::Result<()> {
         },
     };
 
+    Ok((store, path_tasks_file))
+}
+
+fn main() -> anyhow::Result<()> {
+    let time_start_program = std::time::Instant::now();
+    let args = Args::parse();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(&args.log_level))
+        .init();
+
+    let (mut store, path_tasks_file) = init_local_files_and_store(&args)?;
+
     match args.command {
         Commands::Start { description } => match handle_command_start(&mut store, description) {
+            Ok(StoreModified::Yes) => persist_tasks(&path_tasks_file, &store),
+            Ok(StoreModified::No) => Ok(()),
+            Err(e) => return Err(e),
+        }?,
+
+        Commands::Note { description } => match handle_command_note(&mut store, description) {
             Ok(StoreModified::Yes) => persist_tasks(&path_tasks_file, &store),
             Ok(StoreModified::No) => Ok(()),
             Err(e) => return Err(e),

@@ -24,6 +24,10 @@ impl TaskPending {
         self.notes.last().unwrap().time
     }
 
+    pub fn note_push(&mut self, note: TaskNote) {
+        self.notes.push(note);
+    }
+
     /// Since we may assert the existance of at minimum one `TaskNote`, duration is infallible.<br>
     /// If there is only one note, start and end will be the same and the duration equals zero.
     pub fn duration_in_hours(&self) -> f64 {
