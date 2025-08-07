@@ -1,3 +1,7 @@
+//! One problem is that throughout the codebase we rely on the store not
+//! being manually edited by someone. We rely on the order of the items in the array and
+//! assert that there exists at least one tasknote. Currently I dont care but technically its not robust.
+
 use anyhow::Context;
 use chrono::Utc;
 use clap::{Parser, Subcommand, ValueEnum};
@@ -13,7 +17,7 @@ mod helpers;
 mod tasks; // Moved types to tasks-module so that we can restrict construction
 
 use crate::{
-    helpers::duration_in_hours,
+    helpers::{duration_in_hours, generate_table, generate_table_pending},
     tasks::{TaskFinished, TaskNote, TaskPending},
 };
 
@@ -45,8 +49,10 @@ enum Commands {
     Cancel {},
     /// Clears i.e. removes all finished tasks from the store. Does not modify the store if there is a pending task.
     Clear {},
-    /// Print human readable information about finished and pending tasks.
+    /// Print human readable information about the pending task.
     Status {},
+    /// Print human readable information about the finished tasks.
+    List {},
     /// Generate output for integrating into other tools.
     Export {
         #[arg(value_enum, default_value_t = ExportStrategy::Csv)]
@@ -147,18 +153,29 @@ fn handle_command_stop(store: &mut Store) -> anyhow::Result<StoreModified> {
 }
 
 fn handle_command_status(store: &Store) -> anyhow::Result<()> {
-    if store.finished.is_empty() {
-        println!("No finished tasks")
-    } else {
-        println!("{} finished tasks", store.finished.len());
-        store.finished.iter().for_each(|task| println!("{task}"));
-    }
-
-    println!();
-
     match &store.pending {
         None => println!("No pending task"),
-        Some(pending) => println!("{pending}"),
+        Some(pending) => println!("{}", generate_table_pending(pending)),
+    }
+
+    Ok(())
+}
+
+fn handle_command_list(store: &Store) -> anyhow::Result<()> {
+    let hours = store.finished.iter().fold(0.0f64, |acc, task| {
+        acc + duration_in_hours(&task.time_start, &task.time_stop)
+    });
+    let sum_col_label = format!("total {hours:.2}h"); // Could add 
+    let iter = store.finished.iter().flat_map(|task| task.iter_notes());
+    let table = generate_table("%Y-%m-%d %H:%M", "At", "Description", &sum_col_label, iter);
+
+    println!("{table}");
+
+    if let Some(pending) = &store.pending {
+        warn!(
+            "There is a pending task:\n{}",
+            generate_table_pending(pending)
+        )
     }
 
     Ok(())
@@ -223,7 +240,10 @@ fn handle_command_export(store: &Store, strategy: ExportStrategy) -> anyhow::Res
     println!("{content}");
 
     if let Some(pending) = &store.pending {
-        warn!("There is a pending task: {pending}")
+        warn!(
+            "There is a pending task:\n{}",
+            generate_table_pending(pending)
+        )
     }
 
     Ok(())
@@ -249,7 +269,10 @@ fn handle_command_cancel(store: &mut Store) -> anyhow::Result<StoreModified> {
 /// Returns early and does not modify the store if there is a pending task
 fn handle_command_clear(store: &mut Store) -> anyhow::Result<StoreModified> {
     if let Some(pending) = &store.pending {
-        warn!("There is a pending task: {pending}");
+        warn!(
+            "There is a pending task:\n{}",
+            generate_table_pending(pending)
+        );
         error!("There is a pending task! You must finish or cancel it before you can clear.");
         return Ok(StoreModified::No);
     }
@@ -430,6 +453,7 @@ fn main() -> anyhow::Result<()> {
         }?,
 
         Commands::Status {} => handle_command_status(&store)?,
+        Commands::List {} => handle_command_list(&store)?,
         Commands::Export { strategy } => handle_command_export(&store, strategy)?,
     }
 

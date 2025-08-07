@@ -1,9 +1,94 @@
-use chrono::{DateTime, Utc};
+use std::cmp;
+
+use chrono::{DateTime, Local, Utc};
+
+use crate::tasks::{TaskNote, TaskPending};
 
 pub fn duration_in_hours(start: &DateTime<Utc>, end: &DateTime<Utc>) -> f64 {
     end.signed_duration_since(start).num_seconds() as f64
             / 60.0 // minutes
             / 60.0 // hours
+}
+
+pub fn generate_table<'a>(
+    date_format: &str,
+    date_col_label: &str,
+    description_col_label: &str,
+    sum_col_label: &str,
+    iter_notes: impl Iterator<Item = &'a TaskNote>,
+) -> String {
+    let mut output = String::with_capacity(1024);
+    let notes = iter_notes.collect::<Vec<_>>();
+
+    let date_format_expanded_len = Utc::now().format(date_format).to_string().len();
+    let date_col_max_len = cmp::max(date_col_label.len(), date_format_expanded_len);
+    let description_col_max_len = cmp::max(
+        description_col_label.len(),
+        notes
+            .iter()
+            .max_by(|a, b| a.description.len().cmp(&b.description.len()))
+            .unwrap() // We may assert there is one, see `TaskPending`
+            .description
+            .len(),
+    );
+
+    let sum_col_max_len = cmp::max(date_col_max_len, sum_col_label.len());
+    let date_col_max_len = sum_col_max_len; // Make sure the first column is in sync, since sum is underneath
+
+    // Header Top
+    output.push_str(&format!(
+        "┌─{:─^date_col_max_len$}─┬─{0:─<description_col_max_len$}─┐\n",
+        "─",
+    ));
+
+    // Header Content
+    output.push_str(&format!(
+        "│ {date_col_label:^date_col_max_len$} │ {description_col_label:^description_col_max_len$} │\n",
+    ));
+
+    // Header Bottom
+    output.push_str(&format!(
+        "├─{:─^date_col_max_len$}─┼─{0:─^description_col_max_len$}─┤\n",
+        "─",
+    ));
+
+    // Each Row
+    notes.iter().for_each(|n| {
+        let col_date = n.time.with_timezone(&Local).format(date_format).to_string();
+        let description = &n.description;
+
+        output.push_str(&format!(
+            "│ {col_date:^date_col_max_len$} │ {description:<description_col_max_len$} │\n"
+        ));
+    });
+
+    // Footer Top
+    output.push_str(&format!(
+        "├─{:─^date_col_max_len$}─┼─{0:─^description_col_max_len$}─┘\n",
+        "─",
+    ));
+
+    // Footer Content
+    output.push_str(&format!("│ {sum_col_label:>sum_col_max_len$} │\n"));
+
+    // Footer Bottom
+    output.push_str(&format!("└─{:─^date_col_max_len$}─┘\n", "─",));
+
+    output
+}
+
+pub fn generate_table_pending(task: &TaskPending) -> String {
+    let hours = duration_in_hours(&task.time_start(), &task.time_stop());
+    let hours_pending = duration_in_hours(&task.time_start(), &Utc::now());
+    let sum_col_label = format!("tasks {hours:.2}h, {hours_pending:.2}h pending");
+
+    generate_table(
+        "%Y-%m-%d %H:%M",
+        "At",
+        "Description",
+        &sum_col_label,
+        task.iter_notes(),
+    )
 }
 
 #[cfg(test)]

@@ -1,9 +1,5 @@
-use std::fmt::Display;
-
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-
-use crate::helpers::duration_in_hours;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -22,32 +18,17 @@ impl TaskPending {
     }
 
     /// We may assert that pending tasks have at minimum one note that gets created at construction, see `new`
-    pub fn time_end(&self) -> DateTime<Utc> {
+    pub fn time_stop(&self) -> DateTime<Utc> {
         self.notes.last().unwrap().time
     }
 
     pub fn note_push(&mut self, note: TaskNote) {
         self.notes.push(note);
     }
-}
 
-impl Display for TaskPending {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Started on {}, is taking {:.2}h, notes:\n{}",
-            self.time_start().with_timezone(&Local).format("%Y-%m-%d"),
-            duration_in_hours(&self.time_start(), &Utc::now()),
-            self.notes
-                .iter()
-                .map(|n| format!(
-                    "    - {} => {}",
-                    n.time.with_timezone(&Local).format("%H:%M"),
-                    n.description
-                ))
-                .collect::<Vec<_>>()
-                .join("\n")
-        )
+    /// Iterator for going over this tasks notes
+    pub fn iter_notes(&self) -> impl ExactSizeIterator<Item = &TaskNote> {
+        self.notes.iter()
     }
 }
 
@@ -75,28 +56,8 @@ impl From<TaskPending> for TaskFinished {
     fn from(value: TaskPending) -> Self {
         Self {
             time_start: value.time_start(),
-            time_stop: value.time_end(),
+            time_stop: value.time_stop(),
             notes: value.notes,
         }
-    }
-}
-
-impl Display for TaskFinished {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Finished on {}, took {:.2}h, notes:\n{}",
-            self.time_stop.with_timezone(&Local).format("%Y-%m-%d"),
-            duration_in_hours(&self.time_start, &self.time_stop),
-            self.notes
-                .iter()
-                .map(|n| format!(
-                    "    - {} => {}",
-                    n.time.with_timezone(&Local).format("%H:%M"),
-                    n.description
-                ))
-                .collect::<Vec<_>>()
-                .join("\n")
-        )
     }
 }
