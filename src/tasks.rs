@@ -1,4 +1,6 @@
-use chrono::{DateTime, Utc};
+use std::fmt::Display;
+
+use chrono::{DateTime, Local, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::helpers::duration_in_hours;
@@ -27,20 +29,24 @@ impl TaskPending {
     pub fn note_push(&mut self, note: TaskNote) {
         self.notes.push(note);
     }
+}
 
-    /// Opinionated string for convenient printing
-    pub fn human_readable(&self) -> String {
-        format!(
-            "Started at {}, is taking {:.2}h, notes:\n    - {}",
-            self.time_start()
-                .with_timezone(&chrono::Local)
-                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+impl Display for TaskPending {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Started on {}, is taking {:.2}h, notes:\n{}",
+            self.time_start().with_timezone(&Local).format("%Y-%m-%d"),
             duration_in_hours(&self.time_start(), &Utc::now()),
             self.notes
                 .iter()
-                .map(|note| { note.description.clone() })
+                .map(|n| format!(
+                    "    - {} => {}",
+                    n.time.with_timezone(&Local).format("%H:%M"),
+                    n.description
+                ))
                 .collect::<Vec<_>>()
-                .join("\n    - "),
+                .join("\n")
         )
     }
 }
@@ -59,22 +65,6 @@ pub struct TaskFinished {
 }
 
 impl TaskFinished {
-    /// Opinionated string for convenient printing
-    pub fn human_readable(&self) -> String {
-        format!(
-            "Finished at {}, took {:.2}h, description:\n    - {}",
-            self.time_stop
-                .with_timezone(&chrono::Local)
-                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-            duration_in_hours(&self.time_start, &self.time_stop),
-            self.notes
-                .iter()
-                .map(|note| { note.description.clone() })
-                .collect::<Vec<_>>()
-                .join("\n    - "),
-        )
-    }
-
     /// Iterator for going over this tasks notes
     pub fn iter_notes(&self) -> impl ExactSizeIterator<Item = &TaskNote> {
         self.notes.iter()
@@ -88,5 +78,25 @@ impl From<TaskPending> for TaskFinished {
             time_stop: value.time_end(),
             notes: value.notes,
         }
+    }
+}
+
+impl Display for TaskFinished {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Finished on {}, took {:.2}h, notes:\n{}",
+            self.time_stop.with_timezone(&Local).format("%Y-%m-%d"),
+            duration_in_hours(&self.time_start, &self.time_stop),
+            self.notes
+                .iter()
+                .map(|n| format!(
+                    "    - {} => {}",
+                    n.time.with_timezone(&Local).format("%H:%M"),
+                    n.description
+                ))
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
     }
 }

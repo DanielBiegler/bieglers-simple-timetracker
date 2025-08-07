@@ -151,17 +151,14 @@ fn handle_command_status(store: &Store) -> anyhow::Result<()> {
         println!("No finished tasks")
     } else {
         println!("{} finished tasks", store.finished.len());
-        store
-            .finished
-            .iter()
-            .for_each(|task| println!("{}", task.human_readable()));
+        store.finished.iter().for_each(|task| println!("{task}"));
     }
 
     println!();
 
     match &store.pending {
         None => println!("No pending task"),
-        Some(pending) => println!("{}", pending.human_readable()),
+        Some(pending) => println!("{pending}"),
     }
 
     Ok(())
@@ -226,7 +223,7 @@ fn handle_command_export(store: &Store, strategy: ExportStrategy) -> anyhow::Res
     println!("{content}");
 
     if let Some(pending) = &store.pending {
-        warn!("There is a pending task: {}", pending.human_readable())
+        warn!("There is a pending task: {pending}")
     }
 
     Ok(())
@@ -252,7 +249,7 @@ fn handle_command_cancel(store: &mut Store) -> anyhow::Result<StoreModified> {
 /// Returns early and does not modify the store if there is a pending task
 fn handle_command_clear(store: &mut Store) -> anyhow::Result<StoreModified> {
     if let Some(pending) = &store.pending {
-        warn!("There is a pending task: {}", pending.human_readable());
+        warn!("There is a pending task: {pending}");
         error!("There is a pending task! You must finish or cancel it before you can clear.");
         return Ok(StoreModified::No);
     }
