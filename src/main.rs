@@ -1,7 +1,3 @@
-//! One problem is that throughout the codebase we rely on the store not
-//! being manually edited by someone. We rely on the order of the items in the array and
-//! assert that there exists at least one tasknote. Currently I dont care but technically its not robust.
-
 use anyhow::Context;
 use chrono::Utc;
 use clap::{Parser, Subcommand, ValueEnum};
@@ -92,6 +88,48 @@ struct Store {
     /// By forcing only one pending task I want to encourage focus and chronological order of time passing
     pending: Option<TaskPending>,
     finished: Vec<TaskFinished>,
+}
+
+enum StoreValidationError<'a> {
+    TaskPendingMissingNote(&'a TaskPending),
+    TaskFinishedMissingNote(&'a TaskFinished),
+}
+
+impl Store {
+    /// Asserts that:
+    /// 1. Each finished and pending task have at minimum one task-note
+    fn is_valid(&self) -> anyhow::Result<(), StoreValidationError> {
+        if let Some(pending) = &self.pending
+            && pending.iter_notes().count() == 0
+        {
+            return Err(StoreValidationError::TaskPendingMissingNote(pending));
+        }
+
+        for task in self.finished.iter() {
+            if task.iter_notes().count() == 0 {
+                return Err(StoreValidationError::TaskFinishedMissingNote(task));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Makes sure the notes are in chronological order
+    fn sort_notes(&mut self) -> anyhow::Result<()> {
+        if let Some(pending) = self.pending.as_mut() {
+            debug!("Sorting notes of the pending task");
+            pending.sort_notes_by_date();
+        }
+
+        if !self.finished.is_empty() {
+            debug!("Sorting notes of finished tasks");
+            self.finished
+                .iter_mut()
+                .for_each(|task| task.sort_notes_by_date());
+        }
+
+        Ok(())
+    }
 }
 
 /// Starts a new task
@@ -328,6 +366,8 @@ fn persist_tasks(path_file: &PathBuf, store: &Store) -> anyhow::Result<()> {
 }
 
 /// Just a helper to keep the main function tidy and focused.
+///
+/// Also validates tasks and sorts their notes by date so that we can rely on the order
 fn init_local_files_and_store(args: &Args) -> anyhow::Result<(Store, PathBuf)> {
     if !args.output.is_dir() {
         debug!("Output path does not exist");
@@ -344,7 +384,7 @@ fn init_local_files_and_store(args: &Args) -> anyhow::Result<(Store, PathBuf)> {
     let path_tasks_file = args.output.join("tasks.json");
     debug!("Determined output file to: {}", path_tasks_file.display());
 
-    let store: Store = match File::open(&path_tasks_file)
+    let mut store: Store = match File::open(&path_tasks_file)
         .with_context(|| format!("Failed to read tasks file: {}", path_tasks_file.display()))
     {
         Ok(file) => {
@@ -414,6 +454,20 @@ fn init_local_files_and_store(args: &Args) -> anyhow::Result<(Store, PathBuf)> {
             _ => return Err(e),
         },
     };
+
+    if let Err(err) = store.is_valid() {
+        return match err {
+            StoreValidationError::TaskPendingMissingNote(task) => {
+                Err(anyhow::anyhow!("Pending task has no notes! See: {task:#?}"))
+            }
+            StoreValidationError::TaskFinishedMissingNote(task) => {
+                Err(anyhow::anyhow!("Finished task has no notes! See: {task:#?}"))
+            }
+        }
+        .context("All tasks are required to have at minimum one note. Fix this by manually editing your tasks file.");
+    }
+
+    store.sort_notes()?;
 
     Ok((store, path_tasks_file))
 }

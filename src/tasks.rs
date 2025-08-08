@@ -30,6 +30,10 @@ impl TaskPending {
     pub fn iter_notes(&self) -> impl ExactSizeIterator<Item = &TaskNote> {
         self.notes.iter()
     }
+
+    pub fn sort_notes_by_date(&mut self) {
+        self.notes.sort_by(|a, b| a.time.cmp(&b.time));
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -49,6 +53,10 @@ impl TaskFinished {
     /// Iterator for going over this tasks notes
     pub fn iter_notes(&self) -> impl ExactSizeIterator<Item = &TaskNote> {
         self.notes.iter()
+    }
+
+    pub fn sort_notes_by_date(&mut self) {
+        self.notes.sort_by(|a, b| a.time.cmp(&b.time));
     }
 }
 
