@@ -154,7 +154,7 @@ fn handle_command_stop(store: &mut Store) -> anyhow::Result<StoreModified> {
 
 fn handle_command_status(store: &Store) -> anyhow::Result<()> {
     match &store.pending {
-        None => println!("No pending task"),
+        None => warn!("Checking the status returned nothing because there is no pending task"),
         Some(pending) => println!("{}", generate_table_pending(pending)),
     }
 
