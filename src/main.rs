@@ -17,6 +17,8 @@ use crate::{
     tasks::{TaskFinished, TaskNote, TaskPending},
 };
 
+// Currently a bool would do but there was an idea to hold more info about what exactly changed
+// Leave it for now, its no biggie
 enum StoreModified {
     Yes,
     No,
@@ -39,6 +41,8 @@ enum Commands {
     Start { description: String },
     /// Add a note to the pending task.
     Note { description: String },
+    /// Changes the description of the pending task.
+    Amend { description: String },
     /// Stop the pending task.
     Stop {},
     /// Cancels i.e. removes the pending task.
@@ -171,6 +175,26 @@ fn handle_command_note(store: &mut Store, description: String) -> anyhow::Result
     }
 }
 
+fn handle_command_amend(store: &mut Store, description: String) -> anyhow::Result<StoreModified> {
+    match store.pending.as_mut() {
+        None => {
+            warn!("Amending did nothing because there is no pending task");
+            Ok(StoreModified::No)
+        }
+        Some(pending) => {
+            // Relies on assetion that the order is sorted, see init fn
+            match pending.iter_notes_mut().next_back() {
+                Some(note) => {
+                    note.description = description;
+                    info!("Amended last note with new description");
+                    Ok(StoreModified::Yes)
+                }
+                None => Ok(StoreModified::No), // Relies on assertion that every task has a note, see init fn
+            }
+        }
+    }
+}
+
 fn handle_command_stop(store: &mut Store) -> anyhow::Result<StoreModified> {
     let finished: TaskFinished = match store.pending.take() {
         Some(task) => TaskFinished::from(task),
@@ -190,19 +214,19 @@ fn handle_command_stop(store: &mut Store) -> anyhow::Result<StoreModified> {
     Ok(StoreModified::Yes)
 }
 
-fn handle_command_status(store: &Store) -> anyhow::Result<()> {
+fn handle_command_status(store: &Store) -> anyhow::Result<StoreModified> {
     match &store.pending {
         None => warn!("Checking the status returned nothing because there is no pending task"),
         Some(pending) => println!("{}", generate_table_pending(pending)),
     }
 
-    Ok(())
+    Ok(StoreModified::No)
 }
 
-fn handle_command_list(store: &Store) -> anyhow::Result<()> {
+fn handle_command_list(store: &Store) -> anyhow::Result<StoreModified> {
     if store.finished.is_empty() {
         warn!("Listing did nothing because there are no finished tasks");
-        return Ok(());
+        return Ok(StoreModified::No);
     }
 
     let hours = store.finished.iter().fold(0.0f64, |acc, task| {
@@ -221,7 +245,7 @@ fn handle_command_list(store: &Store) -> anyhow::Result<()> {
         )
     }
 
-    Ok(())
+    Ok(StoreModified::No)
 }
 
 fn export_csv(store: &Store) -> anyhow::Result<String> {
@@ -267,7 +291,7 @@ fn export_csv(store: &Store) -> anyhow::Result<String> {
     Ok(output)
 }
 
-fn handle_command_export(store: &Store, strategy: ExportStrategy) -> anyhow::Result<()> {
+fn handle_command_export(store: &Store, strategy: ExportStrategy) -> anyhow::Result<StoreModified> {
     let content = match strategy {
         ExportStrategy::Debug => format!("{store:#?}"),
         ExportStrategy::Csv => export_csv(store)?,
@@ -277,7 +301,7 @@ fn handle_command_export(store: &Store, strategy: ExportStrategy) -> anyhow::Res
 
     if store.finished.is_empty() {
         warn!("Exporting did nothing because there are no finished tasks");
-        return Ok(());
+        return Ok(StoreModified::No);
     }
 
     println!("{content}");
@@ -289,7 +313,7 @@ fn handle_command_export(store: &Store, strategy: ExportStrategy) -> anyhow::Res
         )
     }
 
-    Ok(())
+    Ok(StoreModified::No)
 }
 
 /// Cancels the pending task and removes it from the store
@@ -480,41 +504,22 @@ fn main() -> anyhow::Result<()> {
 
     let (mut store, path_tasks_file) = init_local_files_and_store(&args)?;
 
-    match args.command {
-        Commands::Start { description } => match handle_command_start(&mut store, description) {
-            Ok(StoreModified::Yes) => persist_tasks(&path_tasks_file, &store),
-            Ok(StoreModified::No) => Ok(()),
-            Err(e) => return Err(e),
-        }?,
-
-        Commands::Note { description } => match handle_command_note(&mut store, description) {
-            Ok(StoreModified::Yes) => persist_tasks(&path_tasks_file, &store),
-            Ok(StoreModified::No) => Ok(()),
-            Err(e) => return Err(e),
-        }?,
-
-        Commands::Stop {} => match handle_command_stop(&mut store) {
-            Ok(StoreModified::Yes) => persist_tasks(&path_tasks_file, &store),
-            Ok(StoreModified::No) => Ok(()),
-            Err(e) => return Err(e),
-        }?,
-
-        Commands::Cancel {} => match handle_command_cancel(&mut store) {
-            Ok(StoreModified::Yes) => persist_tasks(&path_tasks_file, &store),
-            Ok(StoreModified::No) => Ok(()),
-            Err(e) => return Err(e),
-        }?,
-
-        Commands::Clear {} => match handle_command_clear(&mut store) {
-            Ok(StoreModified::Yes) => persist_tasks(&path_tasks_file, &store),
-            Ok(StoreModified::No) => Ok(()),
-            Err(e) => return Err(e),
-        }?,
-
+    let store_got_modified = match args.command {
+        Commands::Start { description } => handle_command_start(&mut store, description)?,
+        Commands::Note { description } => handle_command_note(&mut store, description)?,
+        Commands::Amend { description } => handle_command_amend(&mut store, description)?,
+        Commands::Stop {} => handle_command_stop(&mut store)?,
+        Commands::Cancel {} => handle_command_cancel(&mut store)?,
+        Commands::Clear {} => handle_command_clear(&mut store)?,
         Commands::Status {} => handle_command_status(&store)?,
         Commands::List {} => handle_command_list(&store)?,
         Commands::Export { strategy } => handle_command_export(&store, strategy)?,
-    }
+    };
+
+    match store_got_modified {
+        StoreModified::Yes => persist_tasks(&path_tasks_file, &store)?,
+        StoreModified::No => (),
+    };
 
     let time_stop_program = time_start_program.elapsed();
     debug!("Finished in {}ms", time_stop_program.as_millis());

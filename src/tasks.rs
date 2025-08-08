@@ -27,8 +27,13 @@ impl TaskPending {
     }
 
     /// Iterator for going over this tasks notes
-    pub fn iter_notes(&self) -> impl ExactSizeIterator<Item = &TaskNote> {
+    pub fn iter_notes(&self) -> impl DoubleEndedIterator<Item = &TaskNote> {
         self.notes.iter()
+    }
+
+    /// Iterator for going over this tasks notes
+    pub fn iter_notes_mut(&mut self) -> impl DoubleEndedIterator<Item = &mut TaskNote> {
+        self.notes.iter_mut()
     }
 
     pub fn sort_notes_by_date(&mut self) {
@@ -51,7 +56,7 @@ pub struct TaskFinished {
 
 impl TaskFinished {
     /// Iterator for going over this tasks notes
-    pub fn iter_notes(&self) -> impl ExactSizeIterator<Item = &TaskNote> {
+    pub fn iter_notes(&self) -> impl DoubleEndedIterator<Item = &TaskNote> {
         self.notes.iter()
     }
 
