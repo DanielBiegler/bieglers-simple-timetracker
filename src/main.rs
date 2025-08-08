@@ -162,6 +162,11 @@ fn handle_command_status(store: &Store) -> anyhow::Result<()> {
 }
 
 fn handle_command_list(store: &Store) -> anyhow::Result<()> {
+    if store.finished.is_empty() {
+        warn!("Listing did nothing because there are no finished tasks");
+        return Ok(());
+    }
+
     let hours = store.finished.iter().fold(0.0f64, |acc, task| {
         acc + duration_in_hours(&task.time_start, &task.time_stop)
     });
