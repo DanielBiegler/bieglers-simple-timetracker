@@ -233,8 +233,19 @@ fn handle_command_list(store: &Store) -> anyhow::Result<StoreModified> {
         acc + duration_in_hours(&task.time_start, &task.time_stop)
     });
     let sum_col_label = format!("total {hours:.2}h"); // Could add 
-    let iter = store.finished.iter().flat_map(|task| task.iter_notes());
-    let table = generate_table("%Y-%m-%d %H:%M", "At", "Description", &sum_col_label, iter);
+    let note_blocks: Vec<Vec<&TaskNote>> = store
+        .finished
+        .iter()
+        .map(|task| task.iter_notes().collect::<Vec<_>>())
+        .collect();
+
+    let table = generate_table(
+        "%Y-%m-%d %H:%M",
+        "At",
+        "Description",
+        &sum_col_label,
+        &note_blocks,
+    );
 
     println!("{table}");
 
