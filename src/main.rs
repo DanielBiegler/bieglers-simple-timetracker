@@ -37,7 +37,6 @@ enum ExportStrategy {
 #[derive(Subcommand, Debug)]
 enum Commands {
     /// Start working on something. Creates a new pending task if there is none.
-    /// Usually accompanied by a short note to identify the task for example: "Begin work on issue #123"
     Start { description: String },
     /// Add a note to the pending task.
     Note {
@@ -50,10 +49,14 @@ enum Commands {
     Amend { description: String },
     /// Finish the pending task.
     Finish {},
+    /// Makes the last finished task pending again. Useful if you prematurely finish. We've all been there, bud.
+    Continue {},
+
     /// Cancels i.e. removes the pending task.
     Cancel {},
     /// Clears i.e. removes all finished tasks from the store. Does not modify the store if there is a pending task.
     Clear {},
+
     /// Print human readable information about the pending task.
     Status {},
     /// Print human readable information about the finished tasks.
@@ -217,6 +220,21 @@ fn handle_command_finish(store: &mut Store) -> anyhow::Result<StoreModified> {
     // store.pending = None; // Not needed due to earlier `.take()`
     store.finished.push(finished);
     Ok(StoreModified::Yes)
+}
+
+fn handle_command_continue(store: &mut Store) -> anyhow::Result<StoreModified> {
+    if store.pending.is_some() {
+        warn!("Continuing did nothing because there is a pending task already");
+        return Ok(StoreModified::No);
+    }
+
+    if let Some(finished) = store.finished.pop() {
+        store.pending = Some(TaskPending::from(finished));
+        Ok(StoreModified::Yes)
+    } else {
+        warn!("Continuing did nothing because there are no finished tasks");
+        Ok(StoreModified::No)
+    }
 }
 
 fn handle_command_status(store: &Store) -> anyhow::Result<StoreModified> {
@@ -538,8 +556,11 @@ fn main() -> anyhow::Result<()> {
 
         Commands::Amend { description } => handle_command_amend(&mut store, description)?,
         Commands::Finish {} => handle_command_finish(&mut store)?,
+        Commands::Continue {} => handle_command_continue(&mut store)?,
+
         Commands::Cancel {} => handle_command_cancel(&mut store)?,
         Commands::Clear {} => handle_command_clear(&mut store)?,
+
         Commands::Status {} => handle_command_status(&store)?,
         Commands::List {} => handle_command_list(&store)?,
         Commands::Export { strategy } => handle_command_export(&store, strategy)?,

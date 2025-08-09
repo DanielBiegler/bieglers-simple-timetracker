@@ -74,3 +74,9 @@ impl From<TaskPending> for TaskFinished {
         }
     }
 }
+
+impl From<TaskFinished> for TaskPending {
+    fn from(value: TaskFinished) -> Self {
+        Self { notes: value.notes }
+    }
+}
