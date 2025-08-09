@@ -205,7 +205,12 @@ fn handle_command_amend(store: &mut Store, description: String) -> anyhow::Resul
 
 fn handle_command_finish(store: &mut Store) -> anyhow::Result<StoreModified> {
     let finished: TaskFinished = match store.pending.take() {
-        Some(task) => TaskFinished::from(task),
+        Some(task) => {
+            if task.iter_notes().count() == 1 {
+                warn!("The pending task only has one note, this means it has a duration of zero!")
+            }
+            TaskFinished::from(task)
+        }
         None => {
             warn!("Stopping did nothing because there is no pending task");
             return Ok(StoreModified::No);
@@ -577,112 +582,128 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-//     #[test]
-//     fn adding_tasks() {
-//         let mut store = Store::default();
-//         assert_eq!(0, store.finished.len());
+    #[test]
+    fn start_task() {
+        let mut store = Store::default();
 
-//         handle_command_start(&mut store, "#1".to_string()).unwrap();
-//         assert_eq!(1, store.finished.len());
-//         assert_eq!(1, store.tasks_pending().count());
-//         assert_eq!(0, store.tasks_finished().count());
+        handle_command_start(&mut store, "#1".to_string()).unwrap();
+        assert!(store.pending.is_some());
+        assert_eq!(0, store.finished.len());
+    }
 
-//         handle_command_start(&mut store, "#2".to_string()).unwrap();
-//         assert_eq!(1, store.finished.len());
-//         assert_eq!(1, store.tasks_pending().count());
-//         assert_eq!(0, store.tasks_finished().count());
-//     }
+    #[test]
+    fn fail_to_start_task_when_pending() {
+        let mut store = Store::default();
 
-//     #[test]
-//     fn stopping_empty_tasklist() {
-//         let mut store = Store::default();
-//         assert_eq!(0, store.finished.len());
+        handle_command_start(&mut store, "#1".to_string()).unwrap();
+        handle_command_start(&mut store, "#2".to_string()).unwrap();
+        let description = store
+            .pending
+            .unwrap()
+            .iter_notes()
+            .next()
+            .unwrap()
+            .description
+            .clone();
 
-//         handle_command_stop(&mut store, "There are no tasks".to_string()).unwrap();
-//         assert_eq!(0, store.finished.len());
-//     }
+        assert_eq!("#1", description); // Should not get changed
+        assert_eq!(0, store.finished.len());
+    }
 
-//     #[test]
-//     fn start_and_stop_one_task() {
-//         let mut store = Store::default();
-//         assert_eq!(0, store.finished.len());
+    #[test]
+    fn add_notes() {
+        let mut store = Store::default();
 
-//         handle_command_start(&mut store, "Start test".to_string()).unwrap();
-//         assert_eq!(1, store.finished.len());
-//         assert_eq!(1, store.tasks_pending().count());
-//         assert_eq!(0, store.tasks_finished().count());
+        handle_command_start(&mut store, "#1".to_string()).unwrap();
+        assert_eq!(1, store.pending.as_ref().unwrap().iter_notes().count());
+        handle_command_note(&mut store, "#2".to_string()).unwrap();
+        assert_eq!(2, store.pending.as_ref().unwrap().iter_notes().count());
+    }
 
-//         handle_command_stop(&mut store, "Done testing".to_string()).unwrap();
-//         assert_eq!(1, store.finished.len());
-//         assert_eq!(0, store.tasks_pending().count());
-//         assert_eq!(1, store.tasks_finished().count());
-//     }
+    #[test]
+    fn dont_add_note_due_no_pending_task() {
+        let mut store = Store::default();
+        assert!(store.pending.is_none());
 
-//     #[test]
-//     fn cancel_empty_tasklist() {
-//         let mut store = Store::default();
-//         assert_eq!(0, store.finished.len());
+        let res = handle_command_note(&mut store, "#1".to_string()).unwrap();
+        assert!(matches!(res, StoreModified::No));
+        assert!(store.pending.is_none());
+    }
 
-//         handle_command_cancel(&mut store).unwrap();
-//         assert_eq!(0, store.finished.len());
-//         assert_eq!(0, store.tasks_pending().count());
-//         assert_eq!(0, store.tasks_finished().count());
-//     }
+    #[test]
+    fn amend_note() {
+        let mut store = Store::default();
 
-//     #[test]
-//     fn cancel_active_tasks() {
-//         let mut store = Store::default();
-//         assert_eq!(0, store.finished.len());
+        handle_command_start(&mut store, "#1".to_string()).unwrap();
+        handle_command_amend(&mut store, "new".to_string()).unwrap();
+        let description = store
+            .pending
+            .unwrap()
+            .iter_notes()
+            .next()
+            .unwrap()
+            .description
+            .clone();
 
-//         handle_command_start(&mut store, "#1".to_string()).unwrap();
-//         assert_eq!(1, store.finished.len());
-//         assert_eq!(1, store.tasks_pending().count());
-//         assert_eq!(0, store.tasks_finished().count());
+        assert_eq!("new", description);
+    }
 
-//         handle_command_cancel(&mut store).unwrap();
-//         assert_eq!(0, store.finished.len());
-//         assert_eq!(0, store.tasks_pending().count());
-//         assert_eq!(0, store.tasks_finished().count());
-//     }
+    #[test]
+    fn continue_finished_task() {
+        let mut store = Store::default();
 
-//     #[test]
-//     fn clearing_fails_due_to_pending_task() {
-//         let mut store = Store::default();
-//         assert_eq!(0, store.finished.len());
+        handle_command_start(&mut store, "#1".to_string()).unwrap();
+        handle_command_finish(&mut store).unwrap();
+        assert_eq!(1, store.finished.len());
+        assert!(store.pending.is_none());
 
-//         handle_command_start(&mut store, "#1".to_string()).unwrap();
-//         assert_eq!(1, store.finished.len());
-//         assert_eq!(1, store.tasks_pending().count());
-//         assert_eq!(0, store.tasks_finished().count());
+        handle_command_continue(&mut store).unwrap();
+        assert_eq!(0, store.finished.len());
+        assert!(store.pending.is_some());
+    }
 
-//         handle_command_clear(&mut store).unwrap();
-//         assert_eq!(1, store.finished.len());
-//         assert_eq!(1, store.tasks_pending().count());
-//         assert_eq!(0, store.tasks_finished().count());
-//     }
+    #[test]
+    fn finish_tasks() {
+        let mut store = Store::default();
 
-//     #[test]
-//     fn clearing_finished_tasks() {
-//         let mut store = Store::default();
-//         assert_eq!(0, store.finished.len());
+        handle_command_start(&mut store, "#1".to_string()).unwrap();
+        handle_command_finish(&mut store).unwrap();
+        assert_eq!(1, store.finished.len());
 
-//         handle_command_start(&mut store, "#1".to_string()).unwrap();
-//         assert_eq!(1, store.finished.len());
-//         assert_eq!(1, store.tasks_pending().count());
-//         assert_eq!(0, store.tasks_finished().count());
+        handle_command_start(&mut store, "#2".to_string()).unwrap();
+        handle_command_finish(&mut store).unwrap();
+        assert_eq!(2, store.finished.len());
+    }
 
-//         handle_command_stop(&mut store, "#1 Done".to_string()).unwrap();
-//         assert_eq!(1, store.finished.len());
-//         assert_eq!(0, store.tasks_pending().count());
-//         assert_eq!(1, store.tasks_finished().count());
+    #[test]
+    fn clear() {
+        let mut store = Store::default();
 
-//         handle_command_clear(&mut store).unwrap();
-//         assert_eq!(0, store.finished.len());
-//         assert_eq!(0, store.tasks_pending().count());
-//         assert_eq!(0, store.tasks_finished().count());
-//     }
-// }
+        handle_command_start(&mut store, "#1".to_string()).unwrap();
+        handle_command_finish(&mut store).unwrap();
+        assert_eq!(1, store.finished.len());
+
+        handle_command_clear(&mut store).unwrap();
+        assert_eq!(0, store.finished.len());
+    }
+
+    #[test]
+    fn dont_clear_due_pending_task() {
+        let mut store = Store::default();
+
+        handle_command_start(&mut store, "#1".to_string()).unwrap();
+        handle_command_finish(&mut store).unwrap();
+        assert_eq!(1, store.finished.len());
+
+        handle_command_start(&mut store, "#2".to_string()).unwrap();
+        assert!(store.pending.is_some());
+
+        handle_command_clear(&mut store).unwrap();
+        assert_eq!(1, store.finished.len());
+        assert!(store.pending.is_some());
+    }
+}
