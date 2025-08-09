@@ -12,6 +12,10 @@ impl TaskPending {
         TaskPending { notes: vec![note] }
     }
 
+    pub fn notes(&self) -> &Vec<TaskNote> {
+        &self.notes
+    }
+
     /// We may assert that pending tasks have at minimum one note that gets created at construction, see `new`
     pub fn time_start(&self) -> DateTime<Utc> {
         self.notes.first().unwrap().time
@@ -26,14 +30,9 @@ impl TaskPending {
         self.notes.push(note);
     }
 
-    /// Iterator for going over this tasks notes
-    pub fn iter_notes(&self) -> impl DoubleEndedIterator<Item = &TaskNote> {
-        self.notes.iter()
-    }
-
-    /// Iterator for going over this tasks notes
-    pub fn iter_notes_mut(&mut self) -> impl DoubleEndedIterator<Item = &mut TaskNote> {
-        self.notes.iter_mut()
+    /// We may assert that pending tasks have at minimum one note that gets created at construction, see `new`
+    pub fn last_note_mut(&mut self) -> &mut TaskNote {
+        self.notes.last_mut().unwrap()
     }
 
     pub fn sort_notes_by_date(&mut self) {
@@ -55,9 +54,8 @@ pub struct TaskFinished {
 }
 
 impl TaskFinished {
-    /// Iterator for going over this tasks notes
-    pub fn iter_notes(&self) -> impl DoubleEndedIterator<Item = &TaskNote> {
-        self.notes.iter()
+    pub fn notes(&self) -> &Vec<TaskNote> {
+        &self.notes
     }
 
     pub fn sort_notes_by_date(&mut self) {

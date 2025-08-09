@@ -15,10 +15,7 @@ pub fn generate_table(
     date_col_label: &str,
     description_col_label: &str,
     sum_col_label: &str,
-    // We dont need the inner vec, a slice would be nicer but it feels so uncomfy to construct.. See:
-    // store.finished.iter().map(|t| t.iter_notes().collect::<Vec<_>>()).collect::<Vec<Vec<_>>>().iter().map(|v| v.as_slice()).collect::<Vec<&[_]>>().as_slice();
-    // Maybe theres a better way but I do not know at this point
-    note_blocks: &[Vec<&TaskNote>],
+    note_blocks: &[&[TaskNote]],
 ) -> String {
     let mut output = String::with_capacity(1024);
 
@@ -65,7 +62,7 @@ pub fn generate_table(
             ));
         }
 
-        block.iter().for_each(|&note| {
+        block.iter().for_each(|note| {
             let col_date = note
                 .time
                 .with_timezone(&Local)
@@ -99,14 +96,14 @@ pub fn generate_table_pending(task: &TaskPending) -> String {
     let hours = duration_in_hours(&task.time_start(), &task.time_stop());
     let hours_pending = duration_in_hours(&task.time_start(), &Utc::now());
     let sum_col_label = format!("tasks {hours:.2}h, {hours_pending:.2}h pending");
-    let note_blocks = vec![task.iter_notes().collect::<Vec<_>>()];
+    let note_blocks = [task.notes().as_slice()];
 
     generate_table(
         "%Y-%m-%d %H:%M",
         "At",
         "Description",
         &sum_col_label,
-        note_blocks.as_slice(),
+        &note_blocks,
     )
 }
 

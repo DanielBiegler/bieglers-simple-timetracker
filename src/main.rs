@@ -112,13 +112,13 @@ impl Store {
     /// 1. Each finished and pending task have at minimum one task-note
     fn is_valid(&self) -> anyhow::Result<(), StoreValidationError> {
         if let Some(pending) = &self.pending
-            && pending.iter_notes().count() == 0
+            && pending.notes().is_empty()
         {
             return Err(StoreValidationError::TaskPendingMissingNote(pending));
         }
 
         for task in self.finished.iter() {
-            if task.iter_notes().count() == 0 {
+            if task.notes().is_empty() {
                 return Err(StoreValidationError::TaskFinishedMissingNote(task));
             }
         }
@@ -190,15 +190,10 @@ fn handle_command_amend(store: &mut Store, description: String) -> anyhow::Resul
             Ok(StoreModified::No)
         }
         Some(pending) => {
-            // Relies on assetion that the order is sorted, see init fn
-            match pending.iter_notes_mut().next_back() {
-                Some(note) => {
-                    note.description = description;
-                    info!("Amended last note with new description");
-                    Ok(StoreModified::Yes)
-                }
-                None => Ok(StoreModified::No), // Relies on assertion that every task has a note, see init fn
-            }
+            let note = pending.last_note_mut();
+            note.description = description;
+            info!("Amended last note with new description");
+            Ok(StoreModified::Yes)
         }
     }
 }
@@ -206,7 +201,7 @@ fn handle_command_amend(store: &mut Store, description: String) -> anyhow::Resul
 fn handle_command_finish(store: &mut Store) -> anyhow::Result<StoreModified> {
     let finished: TaskFinished = match store.pending.take() {
         Some(task) => {
-            if task.iter_notes().count() == 1 {
+            if task.notes().len() == 1 {
                 warn!("The pending task only has one note, this means it has a duration of zero!")
             }
             TaskFinished::from(task)
@@ -260,11 +255,11 @@ fn handle_command_list(store: &Store) -> anyhow::Result<StoreModified> {
     let hours = store.finished.iter().fold(0.0f64, |acc, task| {
         acc + duration_in_hours(&task.time_start, &task.time_stop)
     });
-    let sum_col_label = format!("total {hours:.2}h"); // Could add 
-    let note_blocks: Vec<Vec<&TaskNote>> = store
+    let sum_col_label = format!("total {hours:.2}h");
+    let note_blocks: Vec<&[TaskNote]> = store
         .finished
         .iter()
-        .map(|task| task.iter_notes().collect::<Vec<_>>())
+        .map(|task| task.notes().as_slice())
         .collect();
 
     let table = generate_table(
@@ -306,7 +301,8 @@ fn export_csv(store: &Store) -> anyhow::Result<String> {
         let hours = duration_in_hours(&task.time_start, &task.time_stop);
 
         let description = task
-            .iter_notes()
+            .notes()
+            .iter()
             .map(|t| {
                 format!(
                     "- {}",
@@ -604,8 +600,8 @@ mod tests {
         let description = store
             .pending
             .unwrap()
-            .iter_notes()
-            .next()
+            .notes()
+            .first()
             .unwrap()
             .description
             .clone();
@@ -619,9 +615,9 @@ mod tests {
         let mut store = Store::default();
 
         handle_command_start(&mut store, "#1".to_string()).unwrap();
-        assert_eq!(1, store.pending.as_ref().unwrap().iter_notes().count());
+        assert_eq!(1, store.pending.as_ref().unwrap().notes().len());
         handle_command_note(&mut store, "#2".to_string()).unwrap();
-        assert_eq!(2, store.pending.as_ref().unwrap().iter_notes().count());
+        assert_eq!(2, store.pending.as_ref().unwrap().notes().len());
     }
 
     #[test]
@@ -643,8 +639,8 @@ mod tests {
         let description = store
             .pending
             .unwrap()
-            .iter_notes()
-            .next()
+            .notes()
+            .first()
             .unwrap()
             .description
             .clone();
