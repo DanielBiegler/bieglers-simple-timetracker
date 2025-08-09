@@ -2,20 +2,16 @@ use anyhow::Context;
 use chrono::Utc;
 use clap::{Parser, Subcommand, ValueEnum};
 use log::{debug, error, info, warn};
-use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
     io::{BufReader, Write},
     path::PathBuf,
 };
+use timetracker::{Store, StoreValidationError, TaskFinished, TaskNote, TaskPending};
 
 mod helpers;
-mod tasks; // Moved types to tasks-module so that we can restrict construction
 
-use crate::{
-    helpers::{duration_in_hours, generate_table, generate_table_pending},
-    tasks::{TaskFinished, TaskNote, TaskPending},
-};
+use crate::helpers::{duration_in_hours, generate_table, generate_table_pending};
 
 // Currently a bool would do but there was an idea to hold more info about what exactly changed
 // Leave it for now, its no biggie
@@ -86,62 +82,6 @@ struct Args {
 
     #[command(subcommand)]
     command: Commands,
-}
-
-#[derive(Debug, Serialize, Deserialize, Default)]
-enum StoreVersion {
-    #[default]
-    V1,
-}
-
-#[derive(Default, Debug, Serialize, Deserialize)]
-struct Store {
-    version: StoreVersion,
-    /// By forcing only one pending task I want to encourage focus and chronological order of time passing
-    pending: Option<TaskPending>,
-    finished: Vec<TaskFinished>,
-}
-
-enum StoreValidationError<'a> {
-    TaskPendingMissingNote(&'a TaskPending),
-    TaskFinishedMissingNote(&'a TaskFinished),
-}
-
-impl Store {
-    /// Asserts that:
-    /// 1. Each finished and pending task have at minimum one task-note
-    fn is_valid(&self) -> anyhow::Result<(), StoreValidationError> {
-        if let Some(pending) = &self.pending
-            && pending.notes().is_empty()
-        {
-            return Err(StoreValidationError::TaskPendingMissingNote(pending));
-        }
-
-        for task in self.finished.iter() {
-            if task.notes().is_empty() {
-                return Err(StoreValidationError::TaskFinishedMissingNote(task));
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Makes sure the notes are in chronological order
-    fn sort_notes(&mut self) -> anyhow::Result<()> {
-        if let Some(pending) = self.pending.as_mut() {
-            debug!("Sorting notes of the pending task");
-            pending.sort_notes_by_date();
-        }
-
-        if !self.finished.is_empty() {
-            debug!("Sorting notes of finished tasks");
-            self.finished
-                .iter_mut()
-                .for_each(|task| task.sort_notes_by_date());
-        }
-
-        Ok(())
-    }
 }
 
 /// Starts a new task

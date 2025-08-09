@@ -1,8 +1,6 @@
-use std::cmp;
-
 use chrono::{DateTime, Local, Utc};
-
-use crate::tasks::{TaskNote, TaskPending};
+use std::cmp;
+use timetracker::{TaskNote, TaskPending};
 
 pub fn duration_in_hours(start: &DateTime<Utc>, end: &DateTime<Utc>) -> f64 {
     end.signed_duration_since(start).num_seconds() as f64
