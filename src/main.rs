@@ -40,11 +40,16 @@ enum Commands {
     /// Usually accompanied by a short note to identify the task for example: "Begin work on issue #123"
     Start { description: String },
     /// Add a note to the pending task.
-    Note { description: String },
+    Note {
+        description: String,
+        /// Finish the task after adding the note.
+        #[arg(short, long, default_value_t = false)]
+        finish: bool,
+    },
     /// Changes the description of the pending task.
     Amend { description: String },
-    /// Stop the pending task.
-    Stop {},
+    /// Finish the pending task.
+    Finish {},
     /// Cancels i.e. removes the pending task.
     Cancel {},
     /// Clears i.e. removes all finished tasks from the store. Does not modify the store if there is a pending task.
@@ -195,7 +200,7 @@ fn handle_command_amend(store: &mut Store, description: String) -> anyhow::Resul
     }
 }
 
-fn handle_command_stop(store: &mut Store) -> anyhow::Result<StoreModified> {
+fn handle_command_finish(store: &mut Store) -> anyhow::Result<StoreModified> {
     let finished: TaskFinished = match store.pending.take() {
         Some(task) => TaskFinished::from(task),
         None => {
@@ -517,9 +522,22 @@ fn main() -> anyhow::Result<()> {
 
     let store_got_modified = match args.command {
         Commands::Start { description } => handle_command_start(&mut store, description)?,
-        Commands::Note { description } => handle_command_note(&mut store, description)?,
+
+        Commands::Note {
+            description,
+            finish,
+        } => match handle_command_note(&mut store, description)? {
+            StoreModified::No => StoreModified::No,
+            StoreModified::Yes => {
+                if finish {
+                    handle_command_finish(&mut store)?;
+                }
+                StoreModified::Yes
+            }
+        },
+
         Commands::Amend { description } => handle_command_amend(&mut store, description)?,
-        Commands::Stop {} => handle_command_stop(&mut store)?,
+        Commands::Finish {} => handle_command_finish(&mut store)?,
         Commands::Cancel {} => handle_command_cancel(&mut store)?,
         Commands::Clear {} => handle_command_clear(&mut store)?,
         Commands::Status {} => handle_command_status(&store)?,
