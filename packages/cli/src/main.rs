@@ -97,7 +97,7 @@ fn handle_command_start(store: &mut Store, description: String) -> anyhow::Resul
 
     store.pending = Some(TaskPending::new(TaskNote {
         time: Utc::now(),
-        description,
+        description: description.trim().to_string(),
     }));
 
     info!("Started a new task");
@@ -113,7 +113,7 @@ fn handle_command_note(store: &mut Store, description: String) -> anyhow::Result
         Some(pending) => {
             pending.note_push(TaskNote {
                 time: Utc::now(),
-                description,
+                description: description.trim().to_string(),
             });
 
             info!("Added note to pending task");
@@ -131,7 +131,7 @@ fn handle_command_amend(store: &mut Store, description: String) -> anyhow::Resul
         }
         Some(pending) => {
             let note = pending.last_note_mut();
-            note.description = description;
+            note.description = description.trim().to_string();
             info!("Amended last note with new description");
             Ok(StoreModified::Yes)
         }

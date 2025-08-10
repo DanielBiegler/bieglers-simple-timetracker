@@ -66,12 +66,18 @@ pub fn generate_table(
                 .with_timezone(&Local)
                 .format(date_format)
                 .to_string();
-            let description = &note.description;
 
-            // Content
-            output.push_str(&format!(
-                "│ {col_date:^date_col_max_len$} │ {description:<description_col_max_len$} │\n"
-            ));
+            for (i, line) in note.description.lines().enumerate() {
+                let date = match i {
+                    0 => &col_date,
+                    _ => "",
+                };
+
+                // Content
+                output.push_str(&format!(
+                    "│ {date:^date_col_max_len$} │ {line:<description_col_max_len$} │\n"
+                ));
+            }
         });
     });
 
