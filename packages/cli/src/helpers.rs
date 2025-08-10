@@ -72,16 +72,25 @@ pub fn generate_table(
                 .format(date_format)
                 .to_string();
 
-            for (i, line) in note.description.lines().enumerate() {
-                let date = match i {
-                    0 => &col_date,
-                    _ => "",
-                };
-
-                // Content
+            // Need an empty check because `.lines()` returns nothing on an empty string
+            // resulting in no line being drawn at all
+            if note.description.is_empty() {
                 output.push_str(&format!(
-                    "│ {date:^date_col_max_len$} │ {line:<description_col_max_len$} │\n"
+                    "│ {col_date:^date_col_max_len$} │ {:<description_col_max_len$} │\n",
+                    note.description
                 ));
+            } else {
+                for (i, line) in note.description.lines().enumerate() {
+                    let date = match i {
+                        0 => &col_date,
+                        _ => "",
+                    };
+
+                    // Content
+                    output.push_str(&format!(
+                        "│ {date:^date_col_max_len$} │ {line:<description_col_max_len$} │\n"
+                    ));
+                }
             }
         });
     });
