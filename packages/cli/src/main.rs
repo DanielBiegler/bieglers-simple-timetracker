@@ -64,7 +64,7 @@ enum Commands {
     },
 }
 
-/// Purposefully Stupid-Simple Personal Time-Tracker made by and for Daniel Biegler https://www.danielbiegler.de
+/// Purposefully Simple Personal Time-Tracker made by and for Daniel Biegler https://www.danielbiegler.de
 #[derive(Parser, Debug)]
 #[command(version, about)]
 struct Args {
