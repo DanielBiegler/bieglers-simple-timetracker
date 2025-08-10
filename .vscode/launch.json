@@ -7,31 +7,31 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "Debug executable 'timetracker'",
+      "name": "Debug executable 'timetracker-cli'",
       "cargo": {
-        "args": ["build", "--bin=timetracker", "--package=timetracker"],
+        "args": ["build", "--bin=timetracker-cli", "--package=timetracker-cli"],
         "filter": {
-          "name": "timetracker",
+          "name": "timetracker-cli",
           "kind": "bin"
         }
       },
       "args": [],
-      "env": { "RUST_LOG": "timetracker=debug" },
+      "env": { "RUST_LOG": "timetracker-cli=debug" },
       "cwd": "${workspaceFolder}"
     },
     {
       "type": "lldb",
       "request": "launch",
-      "name": "Debug unit tests in executable 'timetracker'",
+      "name": "Debug unit tests in executable 'timetracker-cli'",
       "cargo": {
         "args": [
           "test",
           "--no-run",
-          "--bin=timetracker",
-          "--package=timetracker"
+          "--bin=timetracker-cli",
+          "--package=timetracker-cli"
         ],
         "filter": {
-          "name": "timetracker",
+          "name": "timetracker-cli",
           "kind": "bin"
         }
       },
