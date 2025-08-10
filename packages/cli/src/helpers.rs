@@ -23,8 +23,13 @@ pub fn generate_table(
         description_col_label.len(),
         note_blocks
             .iter()
-            .flat_map(|block| block.iter())
-            .max_by(|a, b| a.description.len().cmp(&b.description.len()))
+            .flat_map(|&block| block.iter())
+            .max_by(|&a, &b| {
+                // Find longest line of description
+                let max_len_a = a.description.lines().map(|l| l.len()).max().unwrap_or(0);
+                let max_len_b = b.description.lines().map(|l| l.len()).max().unwrap_or(0);
+                max_len_a.cmp(&max_len_b)
+            })
             .unwrap() // We may assert there is one, see `TaskPending`
             .description
             .len(),
