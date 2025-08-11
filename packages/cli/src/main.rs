@@ -423,7 +423,7 @@ fn init_local_files_and_store(args: &Args) -> anyhow::Result<(Store, PathBuf)> {
                     )
                 })?;
 
-                debug!("Created a new tasks file: {}", path_tasks_file.display());
+                info!("Created a new tasks file: {}", path_tasks_file.display());
 
                 let store = Store::default();
                 serde_json::to_writer(&file_new_store, &store).with_context(|| {
@@ -438,27 +438,29 @@ fn init_local_files_and_store(args: &Args) -> anyhow::Result<(Store, PathBuf)> {
                     path_tasks_file.display()
                 );
 
-                let mut file_new_gitignore =
-                    File::create_new(&path_gitignore_file).with_context(|| {
-                        format!(
-                            "Failed creating new .gitignore file at: {}",
-                            path_gitignore_file.display()
-                        )
-                    })?;
+                if !std::fs::exists(&path_gitignore_file)? {
+                    let mut file_new_gitignore = File::create_new(&path_gitignore_file)
+                        .with_context(|| {
+                            format!(
+                                "Failed creating new .gitignore file at: {}",
+                                path_gitignore_file.display()
+                            )
+                        })?;
 
-                debug!(
-                    "Created a new .gitignore file: {}",
-                    path_gitignore_file.display()
-                );
+                    debug!(
+                        "Created a new .gitignore file: {}",
+                        path_gitignore_file.display()
+                    );
 
-                file_new_gitignore
-                    .write_all(b"*")
-                    .context("Failed writing content into .gitignore file")?;
+                    file_new_gitignore
+                        .write_all(b"*")
+                        .context("Failed writing content into .gitignore file")?;
 
-                debug!(
-                    "Wrote content to new .gitignore file: {}",
-                    path_gitignore_file.display()
-                );
+                    debug!(
+                        "Wrote content to new .gitignore file: {}",
+                        path_gitignore_file.display()
+                    );
+                }
 
                 store
             }
