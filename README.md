@@ -18,20 +18,39 @@ This timetracker specifically forces you to only work on one "time-block" at a t
 Here's how the workflow generally looks like:
 
 1. Figure out what you want to do and start a tracked session with
-    - `tt start "Investigate issue #123"`
-2. Document progress via notes
-    - `tt note "Identified root cause, ..."`
-3. Finish this time block
-    1. `tt note "Fixed it and pushed commits"`
-    2. `tt finish`
+    
+```bash
+tt start "Investigate issue #123"
+```
 
-> Tip: For a one-liner use the `-f --finish` flag
->> `tt note -f "Fixed it and pushed commits"`
+2. Document progress via notes
+
+```bash
+tt note "Identified root cause, ..."
+```
+
+3. Finish this time block
+
+```bash
+tt note "Fixed it and pushed commits"
+tt finish
+```
+
+> [!TIP]
+> For a one-liner use the `-f` or `--finish` flag
+> ```bash
+> tt note -f "Fixed it and pushed commits"
+> ```
 
 The total amount of time for this block is the duration between the first and last note.
 
 4. After taking a break, inspect recent time blocks:
-    - `tt list`
+
+```bash
+tt list
+```
+
+That gives you a pretty ascii table:
 
 ```
 ┌──────────────────┬─────────────────────────────┐
