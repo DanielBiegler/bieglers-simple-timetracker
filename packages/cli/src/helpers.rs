@@ -21,18 +21,12 @@ pub fn generate_table(
     let date_col_max_len = cmp::max(date_col_label.len(), date_format_expanded_len);
     let description_col_max_len = cmp::max(
         description_col_label.len(),
-        note_blocks
+        note_blocks // The longest line of any description
             .iter()
             .flat_map(|&block| block.iter())
-            .max_by(|&a, &b| {
-                // Find longest line of description
-                let max_len_a = a.description.lines().map(|l| l.len()).max().unwrap_or(0);
-                let max_len_b = b.description.lines().map(|l| l.len()).max().unwrap_or(0);
-                max_len_a.cmp(&max_len_b)
-            })
-            .unwrap() // We may assert there is one, see `TaskPending`
-            .description
-            .len(),
+            .map(|note| note.description.lines().map(|l| l.len()).max().unwrap_or(0))
+            .max()
+            .unwrap(), // We may assert there is one
     );
 
     let sum_col_max_len = cmp::max(date_col_max_len, sum_col_label.len());
