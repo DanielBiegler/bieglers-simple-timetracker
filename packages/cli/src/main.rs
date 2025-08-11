@@ -1,6 +1,6 @@
 use anyhow::Context;
 use chrono::Utc;
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use log::{debug, error, info, warn};
 use std::{
     fs::File,
@@ -62,6 +62,8 @@ enum Commands {
         #[arg(value_enum, default_value_t = ExportStrategy::Csv)]
         strategy: ExportStrategy,
     },
+    /// Generate shell-completion
+    ShellCompletion { shell: clap_complete::aot::Shell },
 }
 
 /// Purposefully Simple Personal Time-Tracker made by and for Daniel Biegler https://www.danielbiegler.de
@@ -330,6 +332,17 @@ fn handle_command_clear(store: &mut Store) -> anyhow::Result<StoreModified> {
     Ok(StoreModified::Yes)
 }
 
+fn handle_command_shell_completion(
+    shell: clap_complete::aot::Shell,
+) -> anyhow::Result<StoreModified> {
+    let mut cmd = Args::command();
+    let name = cmd.get_bin_name().unwrap_or("timetracker-cli").to_string();
+
+    clap_complete::aot::generate(shell, &mut cmd, name, &mut std::io::stdout());
+
+    Ok(StoreModified::No)
+}
+
 fn persist_tasks(path_file: &PathBuf, store: &Store) -> anyhow::Result<()> {
     let time = chrono::Utc::now().timestamp_micros();
 
@@ -505,6 +518,8 @@ fn main() -> anyhow::Result<()> {
         Commands::Status {} => handle_command_status(&store)?,
         Commands::List {} => handle_command_list(&store)?,
         Commands::Export { strategy } => handle_command_export(&store, strategy)?,
+
+        Commands::ShellCompletion { shell } => handle_command_shell_completion(shell)?,
     };
 
     match store_got_modified {
