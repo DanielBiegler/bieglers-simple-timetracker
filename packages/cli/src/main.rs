@@ -11,7 +11,7 @@ use timetracker::{Store, StoreValidationError, TaskFinished, TaskNote, TaskPendi
 
 mod helpers;
 
-use crate::helpers::{duration_in_hours, generate_table, generate_table_pending};
+use crate::helpers::{generate_table, generate_table_pending};
 
 // Currently a bool would do but there was an idea to hold more info about what exactly changed
 // Leave it for now, its no biggie
@@ -155,8 +155,9 @@ fn handle_command_finish(store: &mut Store) -> anyhow::Result<StoreModified> {
     };
 
     info!(
-        "Finished pending task, took {:.2}h",
-        duration_in_hours(&finished.time_start, &finished.time_stop)
+        "Finished pending task, took {:.2}h, {:.2}m",
+        finished.duration_in_hours(),
+        finished.duration_in_minutes()
     );
 
     // store.pending = None; // Not needed due to earlier `.take()`
@@ -194,9 +195,10 @@ fn handle_command_list(store: &Store) -> anyhow::Result<StoreModified> {
         return Ok(StoreModified::No);
     }
 
-    let hours = store.finished.iter().fold(0.0f64, |acc, task| {
-        acc + duration_in_hours(&task.time_start, &task.time_stop)
-    });
+    let hours = store
+        .finished
+        .iter()
+        .fold(0.0f64, |acc, task| acc + task.duration_in_hours());
     let sum_col_label = format!("total {hours:.2}h");
     let note_blocks: Vec<&[TaskNote]> = store
         .finished
@@ -240,7 +242,7 @@ fn export_csv(store: &Store) -> anyhow::Result<String> {
             .with_timezone(&chrono::Local)
             .to_rfc3339_opts(chrono::SecondsFormat::Secs, false);
 
-        let hours = duration_in_hours(&task.time_start, &task.time_stop);
+        let hours = task.duration_in_hours();
 
         let description = task
             .notes()
