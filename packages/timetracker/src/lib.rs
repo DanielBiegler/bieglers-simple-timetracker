@@ -1,5 +1,7 @@
+use anyhow::Context;
 use log::debug;
 use serde::{Deserialize, Serialize};
+use std::{fs::File, io::BufReader};
 
 mod tasks;
 
@@ -59,5 +61,28 @@ impl Store {
         }
 
         Ok(())
+    }
+
+    /// Asserts that each task has at minimum one note and that they are sorted chronologically
+    pub fn from_file(file: File) -> anyhow::Result<Store> {
+        let reader = BufReader::new(file);
+        let mut store = serde_json::from_reader::<_, Store>(reader)?;
+
+        if let Err(err) = store.is_valid() {
+            let reason = match err {
+                StoreValidationError::TaskPendingMissingNote(task) => {
+                    Err(anyhow::anyhow!("Pending task has no notes! See: {task:#?}"))
+                }
+                StoreValidationError::TaskFinishedMissingNote(task) => Err(anyhow::anyhow!(
+                    "Finished task has no notes! See: {task:#?}"
+                )),
+            };
+
+            return reason.context("All tasks are required to have at minimum one note. Fix this by manually editing your tasks file.");
+        }
+
+        store.sort_notes()?;
+
+        Ok(store)
     }
 }

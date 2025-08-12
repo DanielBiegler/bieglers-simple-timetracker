@@ -398,18 +398,15 @@ fn init_local_files_and_store(args: &Args) -> anyhow::Result<(Store, PathBuf)> {
     let path_tasks_file = args.output.join("tasks.json");
     debug!("Determined output file to: {}", path_tasks_file.display());
 
-    let mut store: Store = match File::open(&path_tasks_file)
+    let store: Store = match File::open(&path_tasks_file)
         .with_context(|| format!("Failed to read tasks file: {}", path_tasks_file.display()))
     {
-        Ok(file) => {
-            let reader = BufReader::new(file);
-            serde_json::from_reader::<_, Store>(reader).with_context(|| {
-                format!(
-                    "Failed to deserialize tasks file: {}",
-                    path_tasks_file.display()
-                )
-            })?
-        }
+        Ok(file) => Store::from_file(file).with_context(|| {
+            format!(
+                "Failed to deserialize tasks file: {}",
+                path_tasks_file.display()
+            )
+        })?,
         Err(e) => match e.downcast_ref::<std::io::Error>().unwrap().kind() {
             // No tasks found means we should create a new store
             std::io::ErrorKind::NotFound => {
@@ -470,20 +467,6 @@ fn init_local_files_and_store(args: &Args) -> anyhow::Result<(Store, PathBuf)> {
             _ => return Err(e),
         },
     };
-
-    if let Err(err) = store.is_valid() {
-        return match err {
-            StoreValidationError::TaskPendingMissingNote(task) => {
-                Err(anyhow::anyhow!("Pending task has no notes! See: {task:#?}"))
-            }
-            StoreValidationError::TaskFinishedMissingNote(task) => {
-                Err(anyhow::anyhow!("Finished task has no notes! See: {task:#?}"))
-            }
-        }
-        .context("All tasks are required to have at minimum one note. Fix this by manually editing your tasks file.");
-    }
-
-    store.sort_notes()?;
 
     Ok((store, path_tasks_file))
 }
