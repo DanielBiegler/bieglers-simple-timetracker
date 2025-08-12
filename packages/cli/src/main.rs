@@ -2,12 +2,8 @@ use anyhow::Context;
 use chrono::Utc;
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use log::{debug, error, info, warn};
-use std::{
-    fs::File,
-    io::{BufReader, Write},
-    path::PathBuf,
-};
-use timetracker::{Store, StoreValidationError, TaskFinished, TaskNote, TaskPending};
+use std::{fs::File, io::Write, path::PathBuf};
+use timetracker::{Store, TaskFinished, TaskNote, TaskPending};
 
 mod helpers;
 
