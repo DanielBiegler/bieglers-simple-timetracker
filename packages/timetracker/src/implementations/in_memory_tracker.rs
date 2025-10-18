@@ -65,7 +65,11 @@ impl InMemoryTimeTracker {
 impl TimeTrackingStore for InMemoryTimeTracker {
     fn init(strategy: &impl TimeTrackerInitStrategy) -> Result<InMemoryTimeTracker> {
         let store = strategy.init()?;
-        let list = store.finished(&ListOptions::new().take(usize::MAX))?;
+        let list = store.finished(
+            &ListOptions::new()
+                .order(SortOrder::Ascending)
+                .take(usize::MAX),
+        )?;
 
         Ok(InMemoryTimeTracker {
             active: store.active()?,
@@ -232,6 +236,12 @@ impl TimeTrackerInitStrategy for JsonFileLoadingStrategy<'_> {
                 for tb in tracker.finished.iter_mut() {
                     tb.notes.sort_by(|a, b| a.time.cmp(&b.time));
                 }
+
+                tracker.finished.sort_by(|a, b| {
+                    let a_time = a.time_start().unwrap_or_default();
+                    let b_time = b.time_start().unwrap_or_default();
+                    a_time.cmp(&b_time)
+                });
             }
             Err(e) => return Err(e),
         };

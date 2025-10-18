@@ -73,7 +73,7 @@ impl ListOptions {
         Self {
             skip: 0,
             take: 25,
-            order: SortOrder::Descending,
+            order: SortOrder::Ascending,
         }
     }
 

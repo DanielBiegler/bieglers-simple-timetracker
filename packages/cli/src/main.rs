@@ -84,7 +84,7 @@ enum Commands {
         limit: usize,
         /// Order of the listed time boxes.
         /// Descending means the latest time boxes come first.
-        #[arg(value_enum, default_value_t = ListOrder::Descending)]
+        #[arg(value_enum, default_value_t = ListOrder::Ascending)]
         order: ListOrder,
     },
     /// Generate output for integrating into other tools.
