@@ -271,15 +271,9 @@ impl StorageStrategy for JsonStorageStrategy {
         };
 
         if self.pretty {
-            match serde_json::to_writer_pretty(writer, &tracker) {
-                Ok(_) => Ok(()),
-                Err(e) => Err(Error::Serialization(e)),
-            }
+            serde_json::to_writer_pretty(writer, &tracker).map_err(Error::Serialization)
         } else {
-            match serde_json::to_writer(writer, &tracker) {
-                Ok(_) => Ok(()),
-                Err(e) => Err(Error::Serialization(e)),
-            }
+            serde_json::to_writer(writer, &tracker).map_err(Error::Serialization)
         }
     }
 }
