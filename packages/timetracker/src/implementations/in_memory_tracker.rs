@@ -1,7 +1,7 @@
 use std::{fs::File, io::BufReader, path::Path};
 
 use chrono::{DateTime, Utc};
-use log::{debug, error, warn};
+use log::warn;
 use serde::{Deserialize, Serialize};
 
 use crate::{
