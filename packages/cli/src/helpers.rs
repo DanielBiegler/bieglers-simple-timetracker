@@ -1,13 +1,13 @@
 use chrono::{Local, Utc};
 use std::cmp;
-use timetracker::{TaskNote, TaskPending};
+use timetracker::{TimeBox, TimeBoxNote};
 
 pub fn generate_table(
     date_format: &str,
     date_col_label: &str,
     description_col_label: &str,
     sum_col_label: &str,
-    note_blocks: &[&[TaskNote]],
+    note_blocks: &[&[TimeBoxNote]],
 ) -> String {
     let mut output = String::with_capacity(1024);
 
@@ -98,17 +98,61 @@ pub fn generate_table(
     output
 }
 
-pub fn generate_table_pending(task: &TaskPending) -> String {
-    let hours = task.duration_in_hours();
-    let hours_pending = task.duration_active_in_hours();
-    let sum_col_label = format!("tasks {hours:.2}h, {hours_pending:.2}h pending");
-    let note_blocks = [task.notes().as_slice()];
+pub fn generate_table_active(time_box: &TimeBox) -> anyhow::Result<String> {
+    let hours = time_box.duration_in_hours()?;
+    let hours_active = time_box.duration_active_in_hours()?;
+    let sum_col_label = format!("tasks {hours:.2}h, {hours_active:.2}h active");
+    let note_blocks = [time_box.notes.as_slice()];
 
-    generate_table(
+    Ok(generate_table(
         "%Y-%m-%d %H:%M",
         "At",
         "Description",
         &sum_col_label,
         &note_blocks,
-    )
+    ))
+}
+
+pub fn generate_csv_export(finished_time_boxes: &[TimeBox]) -> anyhow::Result<String> {
+    let mut output = String::with_capacity(4096);
+
+    output.push_str("time_start;time_stop;hours;description");
+
+    for time_box in finished_time_boxes.iter() {
+        let time_start = time_box
+            .time_start()?
+            .with_timezone(&chrono::Local)
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, false);
+
+        let time_stop = time_box
+            .time_stop()?
+            .with_timezone(&chrono::Local)
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, false);
+
+        let hours = time_box.duration_in_hours()?;
+
+        let description = time_box
+            .notes
+            .iter()
+            .map(|t| {
+                format!(
+                    "- {}",
+                    t.description
+                        // Not "optimal" going through the string twice but negligable
+                        // TODO Does escaping even work this way? Ehh revisit this in case it comes up
+                        .replace('"', "\\\"")
+                        .replace(';', "\\;")
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        output.push_str(&format!(
+            "\n{time_start};{time_stop};{hours:.2};\"{description}\""
+        ));
+    }
+
+    output.push('\n');
+
+    Ok(output)
 }

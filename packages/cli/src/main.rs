@@ -1,20 +1,23 @@
-use anyhow::Context;
-use chrono::Utc;
-use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
-use log::{debug, error, info, warn};
-use std::{fs::File, io::Write, path::PathBuf};
-use timetracker::{Store, TaskFinished, TaskNote, TaskPending};
+use clap::{Parser, Subcommand, ValueEnum};
+use std::path::PathBuf;
+use timetracker::{
+    ListOptions, SortOrder, TimeTrackingStore,
+    in_memory_tracker::{
+        InMemoryTimeTracker, JsonFileLoadingStrategy, JsonFilePersistenceStrategy,
+    },
+};
 
+use crate::handle_commands::{
+    handle_command_amend, handle_command_cancel, handle_command_clear, handle_command_end,
+    handle_command_export, handle_command_init, handle_command_list, handle_command_note,
+    handle_command_resume, handle_command_shell_completion, handle_command_start,
+    handle_command_status,
+};
+
+mod handle_commands;
 mod helpers;
 
-use crate::helpers::{generate_table, generate_table_pending};
-
-// Currently a bool would do but there was an idea to hold more info about what exactly changed
-// Leave it for now, its no biggie
-enum StoreModified {
-    Yes,
-    No,
-}
+type StoreModified = bool;
 
 #[derive(Debug, Clone, ValueEnum)]
 enum ExportStrategy {
@@ -26,33 +29,64 @@ enum ExportStrategy {
     Json,
 }
 
+#[derive(Debug, Clone, ValueEnum)]
+enum ListOrder {
+    Ascending,
+    Descending,
+}
+
+impl From<ListOrder> for SortOrder {
+    fn from(value: ListOrder) -> Self {
+        match value {
+            ListOrder::Ascending => SortOrder::Ascending,
+            ListOrder::Descending => SortOrder::Descending,
+        }
+    }
+}
+
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Start working on something. Creates a new pending task if there is none.
-    Start { description: String },
-    /// Add a note to the pending task.
+    /// Initialize a new file for time tracking. Does not overwrite if the file already exists.
+    Init {},
+    /// Begin working on something. Creates a new active time box if there is none.
+    Begin { description: String },
+    /// Add a note to the active time box.
     Note {
-        description: String,
-        /// Finish the task after adding the note.
+        /// End the time box after adding the note.
         #[arg(short, long, default_value_t = false)]
-        finish: bool,
+        end: bool,
+        description: String,
     },
-    /// Changes the description of the pending task.
+    /// Changes the description of the active time box.
     Amend { description: String },
-    /// Finish the pending task.
-    Finish {},
-    /// Makes the last finished task pending again. Useful if you prematurely finish. We've all been there, bud.
-    Continue {},
+    /// End the active time box.
+    End {},
+    /// Makes the last finished time box active again. Useful if you prematurely finish. We've all been there, bud.
+    Resume {},
 
-    /// Cancels i.e. removes the pending task.
+    /// Cancels i.e. removes the active time box.
     Cancel {},
-    /// Clears i.e. removes all finished tasks from the store. Does not modify the store if there is a pending task.
+    /// Clears i.e. removes all finished time boxes. Does not modify the store if there is a active time box.
     Clear {},
 
-    /// Print human readable information about the pending task.
+    /// Print human readable information about the active time box.
     Status {},
-    /// Print human readable information about the finished tasks.
-    List {},
+    /// Print human readable information about the finished time boxes.
+    List {
+        /// Lists all finished time boxes.
+        #[arg(short, long, default_value_t = false)]
+        all: bool,
+        /// Used for pagination
+        #[arg(short, long, default_value_t = 0)]
+        page: usize,
+        /// Used for pagination
+        #[arg(short, long, default_value_t = 25)]
+        limit: usize,
+        /// Order of the listed time boxes.
+        /// Descending means the latest time boxes come first.
+        #[arg(value_enum, default_value_t = ListOrder::Descending)]
+        order: ListOrder,
+    },
     /// Generate output for integrating into other tools.
     Export {
         #[arg(value_enum, default_value_t = ExportStrategy::Csv)]
@@ -62,7 +96,7 @@ enum Commands {
     ShellCompletion { shell: clap_complete::aot::Shell },
 }
 
-/// Purposefully Simple Personal Time-Tracker made by and for Daniel Biegler https://www.danielbiegler.de
+/// Purposefully Simple Personal Time-Tracker made by (and mainly for) Daniel Biegler https://www.danielbiegler.de
 #[derive(Parser, Debug)]
 #[command(version, about)]
 struct Args {
@@ -82,562 +116,236 @@ struct Args {
     command: Commands,
 }
 
-/// Starts a new task
-///
-/// Returns early and does not modify the store if there is already a pending task
-fn handle_command_start(store: &mut Store, description: String) -> anyhow::Result<StoreModified> {
-    if store.pending.is_some() {
-        error!(
-            "There is a pending task! Finish or cancel your current task before starting a new one."
-        );
-        return Ok(StoreModified::No);
-    }
-
-    store.pending = Some(TaskPending::new(TaskNote {
-        time: Utc::now(),
-        description: description.trim().to_string(),
-    }));
-
-    info!("Started a new task");
-    Ok(StoreModified::Yes)
-}
-
-fn handle_command_note(store: &mut Store, description: String) -> anyhow::Result<StoreModified> {
-    match store.pending.as_mut() {
-        None => {
-            warn!("Adding a note did nothing because there is no pending task");
-            Ok(StoreModified::No)
-        }
-        Some(pending) => {
-            pending.note_push(TaskNote {
-                time: Utc::now(),
-                description: description.trim().to_string(),
-            });
-
-            info!("Added note to pending task");
-
-            Ok(StoreModified::Yes)
-        }
-    }
-}
-
-fn handle_command_amend(store: &mut Store, description: String) -> anyhow::Result<StoreModified> {
-    match store.pending.as_mut() {
-        None => {
-            warn!("Amending did nothing because there is no pending task");
-            Ok(StoreModified::No)
-        }
-        Some(pending) => {
-            let note = pending.last_note_mut();
-            note.description = description.trim().to_string();
-            info!("Amended last note with new description");
-            Ok(StoreModified::Yes)
-        }
-    }
-}
-
-fn handle_command_finish(store: &mut Store) -> anyhow::Result<StoreModified> {
-    let finished: TaskFinished = match store.pending.take() {
-        Some(task) => {
-            if task.notes().len() == 1 {
-                warn!("The pending task only has one note, this means it has a duration of zero!")
-            }
-            TaskFinished::from(task)
-        }
-        None => {
-            warn!("Stopping did nothing because there is no pending task");
-            return Ok(StoreModified::No);
-        }
-    };
-
-    info!(
-        "Finished pending task, took {:.2}h, {:.2}m",
-        finished.duration_in_hours(),
-        finished.duration_in_minutes()
-    );
-
-    // store.pending = None; // Not needed due to earlier `.take()`
-    store.finished.push(finished);
-    Ok(StoreModified::Yes)
-}
-
-fn handle_command_continue(store: &mut Store) -> anyhow::Result<StoreModified> {
-    if store.pending.is_some() {
-        warn!("Continuing did nothing because there is a pending task already");
-        return Ok(StoreModified::No);
-    }
-
-    if let Some(finished) = store.finished.pop() {
-        store.pending = Some(TaskPending::from(finished));
-        Ok(StoreModified::Yes)
-    } else {
-        warn!("Continuing did nothing because there are no finished tasks");
-        Ok(StoreModified::No)
-    }
-}
-
-fn handle_command_status(store: &Store) -> anyhow::Result<StoreModified> {
-    match &store.pending {
-        None => warn!("Checking the status returned nothing because there is no pending task"),
-        Some(pending) => println!("{}", generate_table_pending(pending)),
-    }
-
-    Ok(StoreModified::No)
-}
-
-fn handle_command_list(store: &Store) -> anyhow::Result<StoreModified> {
-    if store.finished.is_empty() {
-        warn!("Listing did nothing because there are no finished tasks");
-        return Ok(StoreModified::No);
-    }
-
-    let hours = store
-        .finished
-        .iter()
-        .fold(0.0f64, |acc, task| acc + task.duration_in_hours());
-    let sum_col_label = format!("total {hours:.2}h");
-    let note_blocks: Vec<&[TaskNote]> = store
-        .finished
-        .iter()
-        .map(|task| task.notes().as_slice())
-        .collect();
-
-    let table = generate_table(
-        "%Y-%m-%d %H:%M",
-        "At",
-        "Description",
-        &sum_col_label,
-        &note_blocks,
-    );
-
-    println!("{table}");
-
-    if let Some(pending) = &store.pending {
-        warn!(
-            "There is a pending task:\n{}",
-            generate_table_pending(pending)
-        )
-    }
-
-    Ok(StoreModified::No)
-}
-
-fn export_csv(store: &Store) -> anyhow::Result<String> {
-    let mut output = String::with_capacity(4096);
-
-    output.push_str("time_start;time_stop;hours;description");
-
-    store.finished.iter().for_each(|task| {
-        let time_start = task
-            .time_start
-            .with_timezone(&chrono::Local)
-            .to_rfc3339_opts(chrono::SecondsFormat::Secs, false);
-
-        let time_stop = task
-            .time_stop
-            .with_timezone(&chrono::Local)
-            .to_rfc3339_opts(chrono::SecondsFormat::Secs, false);
-
-        let hours = task.duration_in_hours();
-
-        let description = task
-            .notes()
-            .iter()
-            .map(|t| {
-                format!(
-                    "- {}",
-                    t.description
-                        // Not "optimal" going through the string twice but negligable
-                        // TODO Does escaping even work this way? Ehh revisit this in case it comes up
-                        .replace('"', "\\\"")
-                        .replace(';', "\\;")
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        output.push_str(&format!(
-            "\n{time_start};{time_stop};{hours:.2};\"{description}\""
-        ));
-    });
-
-    output.push('\n');
-
-    Ok(output)
-}
-
-fn handle_command_export(store: &Store, strategy: ExportStrategy) -> anyhow::Result<StoreModified> {
-    let content = match strategy {
-        ExportStrategy::Debug => format!("{store:#?}"),
-        ExportStrategy::Csv => export_csv(store)?,
-        // Including computed fields like hours would probably be nice. Do that once the need comes up.
-        ExportStrategy::Json => serde_json::to_string_pretty::<Vec<_>>(&store.finished)?,
-    };
-
-    if store.finished.is_empty() {
-        warn!("Exporting did nothing because there are no finished tasks");
-        return Ok(StoreModified::No);
-    }
-
-    println!("{content}");
-
-    if let Some(pending) = &store.pending {
-        warn!(
-            "There is a pending task:\n{}",
-            generate_table_pending(pending)
-        )
-    }
-
-    Ok(StoreModified::No)
-}
-
-/// Cancels the pending task and removes it from the store
-fn handle_command_cancel(store: &mut Store) -> anyhow::Result<StoreModified> {
-    match store.pending {
-        Some(_) => {
-            store.pending = None;
-            info!("Canceled pending task");
-            Ok(StoreModified::Yes)
-        }
-        None => {
-            warn!("Canceling did nothing because there are no pending tasks");
-            Ok(StoreModified::No)
-        }
-    }
-}
-
-/// Clears all finished tasks from the store
-///
-/// Returns early and does not modify the store if there is a pending task
-fn handle_command_clear(store: &mut Store) -> anyhow::Result<StoreModified> {
-    if let Some(pending) = &store.pending {
-        warn!(
-            "There is a pending task:\n{}",
-            generate_table_pending(pending)
-        );
-        error!("There is a pending task! You must finish or cancel it before you can clear.");
-        return Ok(StoreModified::No);
-    }
-
-    if store.finished.is_empty() {
-        warn!("Clearing did nothing because there are no tasks");
-        return Ok(StoreModified::No);
-    }
-
-    let count = store.finished.len();
-    store.finished = Default::default();
-    info!("Cleared the task store, removed {count} task/s");
-    Ok(StoreModified::Yes)
-}
-
-fn handle_command_shell_completion(
-    shell: clap_complete::aot::Shell,
-) -> anyhow::Result<StoreModified> {
-    let mut cmd = Args::command();
-    let name = cmd.get_bin_name().unwrap_or("timetracker-cli").to_string();
-
-    clap_complete::aot::generate(shell, &mut cmd, name, &mut std::io::stdout());
-
-    Ok(StoreModified::No)
-}
-
-fn persist_tasks(path_file: &PathBuf, store: &Store) -> anyhow::Result<()> {
-    let time = chrono::Utc::now().timestamp_micros();
-
-    let path_swap = path_file
-        .parent()
-        .context("Invalid directory for saving swap file")?
-        .join(format!(".__{time}_swap_tasks.json"));
-
-    let file_swap = File::create(&path_swap)
-        .with_context(|| format!("Failed creating swap file: {}", path_swap.display()))?;
-
-    debug!("Created file: {}", path_swap.display());
-
-    serde_json::to_writer_pretty(file_swap, store)
-        .with_context(|| format!("Failed serializing to file: {}", path_swap.display()))?;
-
-    debug!(
-        "Serialized swap tasks file to disk: {}",
-        path_swap.display()
-    );
-
-    std::fs::rename(&path_swap, path_file).with_context(|| {
-        format!(
-            "Failed overwriting tasks file \"{}\" with the new content of the swap file \"{}\". Do not run the program again until you resolve this issue, otherwise adding or removing tasks will result in loss of data. Replace the contents of the tasks file with the newer content of the swap file manually.",
-            path_file.display(),
-            path_swap.display()
-        )
-    })?;
-
-    debug!("Successfully replaced tasks file with newer content from the swap file");
-
-    Ok(())
-}
-
-/// Just a helper to keep the main function tidy and focused.
-///
-/// Also validates tasks and sorts their notes by date so that we can rely on the order
-fn init_local_files_and_store(args: &Args) -> anyhow::Result<(Store, PathBuf)> {
-    if !args.output.is_dir() {
-        debug!("Output path does not exist");
-        std::fs::create_dir(&args.output).with_context(|| {
-            format!(
-                "Failed to create output directory: {}",
-                args.output.display()
-            )
-        })?;
-        debug!("Created output directory: {}", args.output.display());
-    }
-
-    let path_gitignore_file = args.output.join(".gitignore");
-    let path_tasks_file = args.output.join("tasks.json");
-    debug!("Determined output file to: {}", path_tasks_file.display());
-
-    let store: Store = match File::open(&path_tasks_file)
-        .with_context(|| format!("Failed to read tasks file: {}", path_tasks_file.display()))
-    {
-        Ok(file) => Store::from_file(file).with_context(|| {
-            format!(
-                "Failed to deserialize tasks file: {}",
-                path_tasks_file.display()
-            )
-        })?,
-        Err(e) => match e.downcast_ref::<std::io::Error>().unwrap().kind() {
-            // No tasks found means we should create a new store
-            std::io::ErrorKind::NotFound => {
-                debug!(
-                    "No tasks file found, creating a new one: {}",
-                    path_tasks_file.display()
-                );
-
-                let file_new_store = File::create_new(&path_tasks_file).with_context(|| {
-                    format!(
-                        "Failed creating new tasks file: {}",
-                        path_tasks_file.display()
-                    )
-                })?;
-
-                info!("Created a new tasks file: {}", path_tasks_file.display());
-
-                let store = Store::default();
-                serde_json::to_writer(&file_new_store, &store).with_context(|| {
-                    format!(
-                        "Failed serializing a new task store to disk: {}",
-                        path_tasks_file.display()
-                    )
-                })?;
-
-                debug!(
-                    "Serialized a new tasks file to disk: {}",
-                    path_tasks_file.display()
-                );
-
-                if !std::fs::exists(&path_gitignore_file)? {
-                    let mut file_new_gitignore = File::create_new(&path_gitignore_file)
-                        .with_context(|| {
-                            format!(
-                                "Failed creating new .gitignore file at: {}",
-                                path_gitignore_file.display()
-                            )
-                        })?;
-
-                    debug!(
-                        "Created a new .gitignore file: {}",
-                        path_gitignore_file.display()
-                    );
-
-                    file_new_gitignore
-                        .write_all(b"*")
-                        .context("Failed writing content into .gitignore file")?;
-
-                    debug!(
-                        "Wrote content to new .gitignore file: {}",
-                        path_gitignore_file.display()
-                    );
-                }
-
-                store
-            }
-            // Other errors like permissions etc. are deemed unrecoverable
-            _ => return Err(e),
-        },
-    };
-
-    Ok((store, path_tasks_file))
-}
-
 fn main() -> anyhow::Result<()> {
-    let time_start_program = std::time::Instant::now();
     let args = Args::parse();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(&args.log_level))
         .init();
 
-    let (mut store, path_tasks_file) = init_local_files_and_store(&args)?;
+    let storage_path = args.output.join("storage.json");
 
-    let store_got_modified = match args.command {
-        Commands::Start { description } => handle_command_start(&mut store, description)?,
+    let mut tracker: InMemoryTimeTracker = match args.command {
+        Commands::Init {} => return handle_command_init(&args.output, &storage_path),
+        _ => InMemoryTimeTracker::init(&JsonFileLoadingStrategy {
+            path: &storage_path,
+        })?,
+    };
 
+    let is_dirty: bool = match args.command {
+        Commands::Init {} => unreachable!("Init gets handled prior to this."),
+        Commands::Begin { description } => handle_command_start(&mut tracker, &description)?,
+        Commands::Status {} => handle_command_status(&tracker)?,
         Commands::Note {
             description,
-            finish,
-        } => match handle_command_note(&mut store, description)? {
-            StoreModified::No => StoreModified::No,
-            StoreModified::Yes => {
-                if finish {
-                    handle_command_finish(&mut store)?;
-                }
-                StoreModified::Yes
+            end: finish,
+        } => handle_command_note(&mut tracker, &description, finish)?,
+        Commands::Amend { description } => handle_command_amend(&mut tracker, &description)?,
+        Commands::Resume {} => handle_command_resume(&mut tracker)?,
+        Commands::Export { strategy } => handle_command_export(&tracker, strategy)?,
+        Commands::End {} => handle_command_end(&mut tracker)?,
+        Commands::Cancel {} => handle_command_cancel(&mut tracker)?,
+        Commands::Clear {} => handle_command_clear(&mut tracker)?,
+        Commands::List {
+            all,
+            page,
+            limit,
+            order,
+        } => {
+            let options = ListOptions::new().order(order.into());
+            if all {
+                handle_command_list(&tracker, &options.take(usize::MAX))?
+            } else {
+                handle_command_list(&tracker, &options.page(page, limit))?
             }
-        },
-
-        Commands::Amend { description } => handle_command_amend(&mut store, description)?,
-        Commands::Finish {} => handle_command_finish(&mut store)?,
-        Commands::Continue {} => handle_command_continue(&mut store)?,
-
-        Commands::Cancel {} => handle_command_cancel(&mut store)?,
-        Commands::Clear {} => handle_command_clear(&mut store)?,
-
-        Commands::Status {} => handle_command_status(&store)?,
-        Commands::List {} => handle_command_list(&store)?,
-        Commands::Export { strategy } => handle_command_export(&store, strategy)?,
-
+        }
         Commands::ShellCompletion { shell } => handle_command_shell_completion(shell)?,
     };
 
-    match store_got_modified {
-        StoreModified::Yes => persist_tasks(&path_tasks_file, &store)?,
-        StoreModified::No => (),
-    };
-
-    let time_stop_program = time_start_program.elapsed();
-    debug!("Finished in {}ms", time_stop_program.as_millis());
+    if is_dirty {
+        tracker.save(&JsonFilePersistenceStrategy {
+            path: &storage_path,
+            store: &tracker,
+        })?;
+    }
 
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use timetracker::TimeTrackerInitStrategy;
+
     use super::*;
 
-    #[test]
-    fn start_task() {
-        let mut store = Store::default();
-
-        handle_command_start(&mut store, "#1".to_string()).unwrap();
-        assert!(store.pending.is_some());
-        assert_eq!(0, store.finished.len());
+    struct TestLoadingStrategy {}
+    impl TimeTrackerInitStrategy for TestLoadingStrategy {
+        fn init(&self) -> Result<impl TimeTrackingStore, timetracker::Error> {
+            Ok(InMemoryTimeTracker::default())
+        }
     }
 
     #[test]
-    fn fail_to_start_task_when_pending() {
-        let mut store = Store::default();
+    fn start_task() -> anyhow::Result<()> {
+        let mut tracker = InMemoryTimeTracker::init(&TestLoadingStrategy {})?;
 
-        handle_command_start(&mut store, "#1".to_string()).unwrap();
-        handle_command_start(&mut store, "#2".to_string()).unwrap();
-        let description = store
-            .pending
+        handle_command_start(&mut tracker, "#1").unwrap();
+        assert_eq!(
+            "#1",
+            tracker
+                .active()?
+                .unwrap()
+                .notes
+                .first()
+                .unwrap()
+                .description
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn fail_to_begin_when_already_active() -> anyhow::Result<()> {
+        let mut tracker = InMemoryTimeTracker::init(&TestLoadingStrategy {})?;
+
+        handle_command_start(&mut tracker, "#1").unwrap();
+        let err = handle_command_start(&mut tracker, "#2").unwrap_err();
+        assert!(matches!(
+            err.downcast::<timetracker::Error>().unwrap(),
+            timetracker::Error::ActiveTimeBoxExistsAlready
+        ));
+
+        let description = tracker
+            .active()?
             .unwrap()
-            .notes()
+            .notes
             .first()
             .unwrap()
             .description
             .clone();
 
         assert_eq!("#1", description); // Should not get changed
-        assert_eq!(0, store.finished.len());
+        assert_eq!(0, tracker.finished(&ListOptions::new())?.total);
+        Ok(())
     }
 
     #[test]
-    fn add_notes() {
-        let mut store = Store::default();
+    fn add_notes() -> anyhow::Result<()> {
+        let mut tracker = InMemoryTimeTracker::init(&TestLoadingStrategy {})?;
 
-        handle_command_start(&mut store, "#1".to_string()).unwrap();
-        assert_eq!(1, store.pending.as_ref().unwrap().notes().len());
-        handle_command_note(&mut store, "#2".to_string()).unwrap();
-        assert_eq!(2, store.pending.as_ref().unwrap().notes().len());
+        handle_command_start(&mut tracker, "#1")?;
+        assert_eq!(1, tracker.active()?.unwrap().notes.len());
+        handle_command_note(&mut tracker, "#2", false).unwrap();
+        assert_eq!(2, tracker.active()?.unwrap().notes.len());
+        Ok(())
     }
 
     #[test]
-    fn dont_add_note_due_no_pending_task() {
-        let mut store = Store::default();
-        assert!(store.pending.is_none());
+    fn dont_add_note_due_no_active_time_box() -> anyhow::Result<()> {
+        let mut tracker = InMemoryTimeTracker::init(&TestLoadingStrategy {})?;
+        assert!(tracker.active()?.is_none());
 
-        let res = handle_command_note(&mut store, "#1".to_string()).unwrap();
-        assert!(matches!(res, StoreModified::No));
-        assert!(store.pending.is_none());
+        let err = handle_command_note(&mut tracker, "#1", false).unwrap_err();
+        assert!(matches!(
+            err.downcast::<timetracker::Error>().unwrap(),
+            timetracker::Error::NoActiveTimeBox
+        ));
+
+        assert!(tracker.active()?.is_none());
+        Ok(())
     }
 
     #[test]
-    fn amend_note() {
-        let mut store = Store::default();
+    fn amend_note() -> anyhow::Result<()> {
+        let mut tracker = InMemoryTimeTracker::init(&TestLoadingStrategy {})?;
 
-        handle_command_start(&mut store, "#1".to_string()).unwrap();
-        handle_command_amend(&mut store, "new".to_string()).unwrap();
-        let description = store
-            .pending
+        handle_command_start(&mut tracker, "#1")?;
+        handle_command_amend(&mut tracker, "new")?;
+        let description = tracker
+            .active()?
             .unwrap()
-            .notes()
+            .notes
             .first()
             .unwrap()
             .description
             .clone();
 
         assert_eq!("new", description);
+        Ok(())
     }
 
     #[test]
-    fn continue_finished_task() {
-        let mut store = Store::default();
+    fn fail_to_amend_note_due_no_active_time_box() -> anyhow::Result<()> {
+        let mut tracker = InMemoryTimeTracker::init(&TestLoadingStrategy {})?;
 
-        handle_command_start(&mut store, "#1".to_string()).unwrap();
-        handle_command_finish(&mut store).unwrap();
-        assert_eq!(1, store.finished.len());
-        assert!(store.pending.is_none());
-
-        handle_command_continue(&mut store).unwrap();
-        assert_eq!(0, store.finished.len());
-        assert!(store.pending.is_some());
+        let err = handle_command_amend(&mut tracker, "new").unwrap_err();
+        assert!(matches!(
+            err.downcast::<timetracker::Error>().unwrap(),
+            timetracker::Error::NoActiveTimeBox
+        ));
+        Ok(())
     }
 
     #[test]
-    fn finish_tasks() {
-        let mut store = Store::default();
+    fn end_time_boxes() -> anyhow::Result<()> {
+        let mut tracker = InMemoryTimeTracker::init(&TestLoadingStrategy {})?;
 
-        handle_command_start(&mut store, "#1".to_string()).unwrap();
-        handle_command_finish(&mut store).unwrap();
-        assert_eq!(1, store.finished.len());
+        handle_command_start(&mut tracker, "#1")?;
+        assert!(tracker.active()?.is_some());
+        handle_command_end(&mut tracker)?;
+        assert_eq!(1, tracker.finished(&ListOptions::new())?.total);
+        assert!(tracker.active()?.is_none());
 
-        handle_command_start(&mut store, "#2".to_string()).unwrap();
-        handle_command_finish(&mut store).unwrap();
-        assert_eq!(2, store.finished.len());
+        handle_command_start(&mut tracker, "#2")?;
+        assert!(tracker.active()?.is_some());
+        handle_command_end(&mut tracker)?;
+        assert_eq!(2, tracker.finished(&ListOptions::new())?.total);
+        assert!(tracker.active()?.is_none());
+
+        Ok(())
     }
 
     #[test]
-    fn clear() {
-        let mut store = Store::default();
+    fn resume_finished_task() -> anyhow::Result<()> {
+        let mut tracker = InMemoryTimeTracker::init(&TestLoadingStrategy {})?;
 
-        handle_command_start(&mut store, "#1".to_string()).unwrap();
-        handle_command_finish(&mut store).unwrap();
-        assert_eq!(1, store.finished.len());
+        handle_command_start(&mut tracker, "#1")?;
+        assert!(tracker.active()?.is_some());
+        handle_command_end(&mut tracker)?;
+        assert_eq!(1, tracker.finished(&ListOptions::new())?.total);
+        assert!(tracker.active()?.is_none());
 
-        handle_command_clear(&mut store).unwrap();
-        assert_eq!(0, store.finished.len());
+        handle_command_resume(&mut tracker)?;
+        assert_eq!(0, tracker.finished(&ListOptions::new())?.total);
+        assert!(tracker.active()?.is_some());
+        Ok(())
     }
 
     #[test]
-    fn dont_clear_due_pending_task() {
-        let mut store = Store::default();
+    fn clear() -> anyhow::Result<()> {
+        let mut tracker = InMemoryTimeTracker::init(&TestLoadingStrategy {})?;
 
-        handle_command_start(&mut store, "#1".to_string()).unwrap();
-        handle_command_finish(&mut store).unwrap();
-        assert_eq!(1, store.finished.len());
+        handle_command_start(&mut tracker, "#1")?;
+        handle_command_end(&mut tracker)?;
+        assert_eq!(1, tracker.finished(&ListOptions::new())?.total);
 
-        handle_command_start(&mut store, "#2".to_string()).unwrap();
-        assert!(store.pending.is_some());
+        handle_command_clear(&mut tracker)?;
+        assert_eq!(0, tracker.finished(&ListOptions::new())?.total);
+        Ok(())
+    }
 
-        handle_command_clear(&mut store).unwrap();
-        assert_eq!(1, store.finished.len());
-        assert!(store.pending.is_some());
+    #[test]
+    fn dont_clear_due_pending_task() -> anyhow::Result<()> {
+        let mut tracker = InMemoryTimeTracker::init(&TestLoadingStrategy {})?;
+
+        handle_command_start(&mut tracker, "#1")?;
+        handle_command_end(&mut tracker)?;
+        assert_eq!(1, tracker.finished(&ListOptions::new())?.total);
+
+        handle_command_start(&mut tracker, "#2")?;
+        assert!(tracker.active()?.is_some());
+
+        let modified = handle_command_clear(&mut tracker)?;
+        assert!(!modified);
+        assert_eq!(1, tracker.finished(&ListOptions::new())?.total);
+        assert!(tracker.active()?.is_some());
+        Ok(())
     }
 }
