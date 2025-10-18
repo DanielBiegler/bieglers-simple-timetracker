@@ -41,14 +41,11 @@ pub trait TimeTrackingStore {
     fn init(strategy: &impl TimeTrackerInitStrategy) -> Result<Self>
     where
         Self: std::marker::Sized;
-
-    /// Persists the time tracker
-    /// TODO maybe remove this
-    fn save(&self, strategy: &impl StorageStrategy) -> Result<()>;
 }
 
 pub trait StorageStrategy {
-    fn write(&self) -> Result<()>;
+    fn write(&self, writer: &mut impl std::io::Write, store: &impl TimeTrackingStore)
+    -> Result<()>;
 }
 
 pub trait TimeTrackerInitStrategy {

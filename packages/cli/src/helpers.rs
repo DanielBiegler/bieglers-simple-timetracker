@@ -1,6 +1,8 @@
+use anyhow::anyhow;
 use chrono::{Local, Utc};
-use std::cmp;
-use timetracker::{TimeBox, TimeBoxNote};
+use log::{debug, error};
+use std::{cmp, fs::File, path::Path};
+use timetracker::{StorageStrategy, TimeBox, TimeBoxNote, in_memory_tracker::InMemoryTimeTracker};
 
 pub fn generate_table(
     date_format: &str,
@@ -155,4 +157,50 @@ pub fn generate_csv_export(finished_time_boxes: &[TimeBox]) -> anyhow::Result<St
     output.push('\n');
 
     Ok(output)
+}
+
+pub fn save_json_to_disk(
+    tracker: &InMemoryTimeTracker,
+    path: &Path,
+    strategy: &impl StorageStrategy,
+) -> anyhow::Result<()> {
+    let time = chrono::Utc::now().timestamp_micros();
+
+    let path_swap = match path.parent() {
+        Some(f) => f,
+        None => {
+            if path.is_absolute() {
+                Path::new("/")
+            } else {
+                Path::new("")
+            }
+        }
+    }
+    .join(format!(".__{time}_swap_tasks.json"));
+
+    let mut file_swap = File::create(&path_swap)?;
+    debug!("Created file: {}", path_swap.display());
+
+    tracker.to_writer(strategy, &mut file_swap)?;
+
+    debug!(
+        "Serialized swap tasks file to disk: {}",
+        path_swap.display()
+    );
+
+    match std::fs::rename(&path_swap, path) {
+        Ok(_) => (),
+        Err(e) => {
+            error!(
+                "Failed overwriting tasks file \"{}\" with the new content of the swap file \"{}\". Do not run the program again until you resolve this issue, otherwise adding or removing tasks will result in loss of data. Replace the contents of the tasks file with the newer content of the swap file manually.",
+                path.display(),
+                path_swap.display()
+            );
+            return Err(anyhow!(e));
+        }
+    };
+
+    debug!("Successfully replaced tasks file with newer content from the swap file");
+
+    Ok(())
 }

@@ -2,16 +2,17 @@ use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 use timetracker::{
     ListOptions, SortOrder, TimeTrackingStore,
-    in_memory_tracker::{
-        InMemoryTimeTracker, JsonFileLoadingStrategy, JsonFilePersistenceStrategy,
-    },
+    in_memory_tracker::{InMemoryTimeTracker, JsonFileLoadingStrategy, JsonStorageStrategy},
 };
 
-use crate::handle_commands::{
-    handle_command_amend, handle_command_cancel, handle_command_clear, handle_command_end,
-    handle_command_export, handle_command_init, handle_command_list, handle_command_note,
-    handle_command_resume, handle_command_shell_completion, handle_command_start,
-    handle_command_status,
+use crate::{
+    handle_commands::{
+        handle_command_amend, handle_command_cancel, handle_command_clear, handle_command_end,
+        handle_command_export, handle_command_init, handle_command_list, handle_command_note,
+        handle_command_resume, handle_command_shell_completion, handle_command_start,
+        handle_command_status,
+    },
+    helpers::save_json_to_disk,
 };
 
 mod handle_commands;
@@ -42,6 +43,12 @@ impl From<ListOrder> for SortOrder {
             ListOrder::Descending => SortOrder::Descending,
         }
     }
+}
+
+#[derive(Debug, Clone, ValueEnum)]
+enum OutputJsonFormat {
+    Compact,
+    Pretty,
 }
 
 #[derive(Subcommand, Debug)]
@@ -104,6 +111,9 @@ struct Args {
     #[arg(short, long, default_value = ".bieglers-timetracker")]
     output: PathBuf,
 
+    #[arg(short, long, value_enum, default_value_t = OutputJsonFormat::Pretty)]
+    json_format: OutputJsonFormat,
+
     /// Level of feedback for your inputs. Gets output into `stderr` so you can still have logs and output into a file normally.
     ///
     /// Environment variable `$RUST_LOG` takes precedence and overwrites this argument.
@@ -124,7 +134,13 @@ fn main() -> anyhow::Result<()> {
     let storage_path = args.output.join("storage.json");
 
     let mut tracker: InMemoryTimeTracker = match args.command {
-        Commands::Init {} => return handle_command_init(&args.output, &storage_path),
+        Commands::Init {} => {
+            let strategy = match args.json_format {
+                OutputJsonFormat::Compact => JsonStorageStrategy { pretty: false },
+                OutputJsonFormat::Pretty => JsonStorageStrategy { pretty: true },
+            };
+            return handle_command_init(&args.output, &storage_path, &strategy);
+        }
         _ => InMemoryTimeTracker::init(&JsonFileLoadingStrategy {
             path: &storage_path,
         })?,
@@ -161,10 +177,12 @@ fn main() -> anyhow::Result<()> {
     };
 
     if is_dirty {
-        tracker.save(&JsonFilePersistenceStrategy {
-            path: &storage_path,
-            store: &tracker,
-        })?;
+        let strategy = match args.json_format {
+            OutputJsonFormat::Compact => JsonStorageStrategy { pretty: false },
+            OutputJsonFormat::Pretty => JsonStorageStrategy { pretty: true },
+        };
+
+        save_json_to_disk(&tracker, &storage_path, &strategy)?
     }
 
     Ok(())

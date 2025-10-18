@@ -4,8 +4,8 @@ use anyhow::{Context, anyhow, bail};
 use clap::CommandFactory;
 use log::{debug, warn};
 use timetracker::{
-    ListOptions, TimeBoxNote, TimeTrackingStore,
-    in_memory_tracker::{InMemoryTimeTracker, JsonFilePersistenceStrategy},
+    ListOptions, StorageStrategy, TimeBoxNote, TimeTrackingStore,
+    in_memory_tracker::InMemoryTimeTracker,
 };
 
 use crate::{
@@ -75,23 +75,22 @@ pub fn handle_command_export(
     Ok(false)
 }
 
-pub fn handle_command_init(storage_directory: &Path, storage_file: &Path) -> anyhow::Result<()> {
+pub fn handle_command_init(
+    storage_directory: &Path,
+    storage_file: &Path,
+    strategy: &impl StorageStrategy,
+) -> anyhow::Result<()> {
     std::fs::create_dir_all(storage_directory)?;
     debug!("Created directories for: {}", storage_directory.display());
 
-    let tracker: InMemoryTimeTracker = if std::fs::exists(storage_file)? {
+    if std::fs::exists(storage_file)? {
         bail!(
             "Time Tracker already exists on path: \"{}\"",
             storage_file.display()
         )
     } else {
-        InMemoryTimeTracker::default()
+        InMemoryTimeTracker::default().to_writer(strategy, &mut File::create_new(storage_file)?)?;
     };
-
-    tracker.save(&JsonFilePersistenceStrategy {
-        store: &tracker,
-        path: storage_file,
-    })?;
 
     let path_gitignore_file = storage_directory.join(".gitignore");
     if !std::fs::exists(&path_gitignore_file)? {

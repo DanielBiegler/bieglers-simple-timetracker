@@ -60,6 +60,14 @@ impl InMemoryTimeTracker {
 
         Ok(())
     }
+
+    pub fn to_writer(
+        &self,
+        strategy: &impl StorageStrategy,
+        writer: &mut impl std::io::Write,
+    ) -> Result<()> {
+        strategy.write(writer, self)
+    }
 }
 
 impl TimeTrackingStore for InMemoryTimeTracker {
@@ -75,10 +83,6 @@ impl TimeTrackingStore for InMemoryTimeTracker {
             active: store.active()?,
             finished: list.items,
         })
-    }
-
-    fn save(&self, strategy: &impl StorageStrategy) -> Result<()> {
-        strategy.write()
     }
 
     fn active(&self) -> Result<Option<TimeBox>> {
@@ -201,12 +205,6 @@ impl TimeTrackingStore for InMemoryTimeTracker {
 }
 
 #[derive(Debug)]
-pub struct JsonFilePersistenceStrategy<'a> {
-    pub store: &'a InMemoryTimeTracker,
-    pub path: &'a Path,
-}
-
-#[derive(Debug)]
 pub struct JsonFileLoadingStrategy<'a> {
     pub path: &'a Path,
 }
@@ -250,53 +248,38 @@ impl TimeTrackerInitStrategy for JsonFileLoadingStrategy<'_> {
     }
 }
 
-impl StorageStrategy for JsonFilePersistenceStrategy<'_> {
-    fn write(&self) -> Result<()> {
-        let time = chrono::Utc::now().timestamp_micros();
+#[derive(Debug)]
+pub struct JsonStorageStrategy {
+    pub pretty: bool,
+}
 
-        let path_swap = match self.path.parent() {
-            Some(f) => f,
-            None => {
-                if self.path.is_absolute() {
-                    Path::new("/")
-                } else {
-                    Path::new("")
-                }
+impl StorageStrategy for JsonStorageStrategy {
+    fn write(
+        &self,
+        writer: &mut impl std::io::Write,
+        store: &impl TimeTrackingStore,
+    ) -> Result<()> {
+        let tracker = InMemoryTimeTracker {
+            active: store.active()?,
+            finished: store
+                .finished(
+                    &ListOptions::new()
+                        .take(usize::MAX)
+                        .order(SortOrder::Ascending),
+                )?
+                .items,
+        };
+
+        if self.pretty {
+            match serde_json::to_writer_pretty(writer, &tracker) {
+                Ok(_) => Ok(()),
+                Err(e) => Err(Error::Serialization(e)),
+            }
+        } else {
+            match serde_json::to_writer(writer, &tracker) {
+                Ok(_) => Ok(()),
+                Err(e) => Err(Error::Serialization(e)),
             }
         }
-        .join(format!(".__{time}_swap_tasks.json"));
-
-        let file_swap = match File::create(&path_swap) {
-            Ok(file) => file,
-            Err(e) => return Err(Error::Io(e)),
-        };
-
-        debug!("Created file: {}", path_swap.display());
-
-        match serde_json::to_writer_pretty(file_swap, self.store) {
-            Ok(_) => (),
-            Err(e) => return Err(Error::Serialization(e)),
-        };
-
-        debug!(
-            "Serialized swap tasks file to disk: {}",
-            path_swap.display()
-        );
-
-        match std::fs::rename(&path_swap, self.path) {
-            Ok(_) => (),
-            Err(e) => {
-                error!(
-                    "Failed overwriting tasks file \"{}\" with the new content of the swap file \"{}\". Do not run the program again until you resolve this issue, otherwise adding or removing tasks will result in loss of data. Replace the contents of the tasks file with the newer content of the swap file manually.",
-                    self.path.display(),
-                    path_swap.display()
-                );
-                return Err(Error::Io(e));
-            }
-        };
-
-        debug!("Successfully replaced tasks file with newer content from the swap file");
-
-        Ok(())
     }
 }
