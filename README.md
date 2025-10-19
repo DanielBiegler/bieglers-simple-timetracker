@@ -16,19 +16,25 @@ This timetracker specifically forces you to only work on one "time-box" at a tim
 
 Here's how the workflow generally looks like:
 
-1. Figure out what you want to do and start a tracked session with
+1. Initialize the directory
+
+```bash
+tt init
+```
+
+2. Figure out what you want to do and start a tracked session with
 
 ```bash
 tt begin "Investigate issue #123"
 ```
 
-1. Document progress via notes
+3. Document progress via notes
 
 ```bash
 tt note "Identified root cause, ..."
 ```
 
-3. Finish this time block
+4. Finish this time block
 
 ```bash
 tt note "Fixed it and pushed commits"
@@ -43,7 +49,7 @@ tt end
 
 The total amount of time for this block is the duration between the first and last note.
 
-4. After taking a break, inspect recent time blocks:
+5. After taking a break, inspect recent time blocks:
 
 ```bash
 tt list
@@ -69,9 +75,79 @@ That gives you a pretty ascii table:
 └──────────────────┘
 ```
 
-All time blocks are by default saved to `./.bieglers-timetracker/storage.json` which means you can track time blocks inside separate folders, easily back them up and even add them to your version control. You may override the output directory via the `-o` or `--output` flag.
+All time blocks are by default saved to `./.bieglers-timetracker/storage.json` which means you can track time blocks inside separate folders, easily back them up and even add them to your version control. You may override the output directory via the `-o` or `--output` flag. By default the `init` command also creates a `.gitignore` inside the new folder so that it doesnt get picked up by git initially.
 
-To learn more use the `help` command.
+To learn more about the usage run the binary with the `help` command.
+
+### Advanced Usage
+
+Listing finished time boxes is a frequent task, for example:
+
+- Checking what the last note was before lunch
+- In the morning to remind yourself what happened yesterday
+- Listing what happened last week to remind yourself for a retrospective session
+- etc.
+
+For ease of use the `list` command features aliases and date filtering, run `help list` for more info, see here:
+
+```
+Usage: timetracker-cli list [OPTIONS]
+
+Options:
+  -a, --all
+          Lists all finished time boxes
+
+  -p, --page <PAGE>
+          Used for pagination if no filter is applied
+          
+          [default: 0]
+
+  -l, --limit <LIMIT>
+          Used for pagination if no filter is applied
+          
+          [default: 25]
+
+  -d, --date <DATE_OR_RANGE>
+          Filter by date or date range
+          
+          Accepts:
+          
+          - 'today', 'yesterday' or custom dates: YYYY-MM-DD
+          
+          - 'this-week', 'last-week', 'this-month', 'last-month' or custom ranges: YYYY-MM-DD..YYYY-MM-DD
+
+  -o, --order <ORDER>
+          Order of the listed time boxes. Descending means the latest time boxes come first
+          
+          [default: ascending]
+          [possible values: ascending, descending]
+```
+
+#### Shell aliases
+
+These advanced commands can become a little annoying to type every day so I definitely recommend creating shell aliases, for example:
+
+```bash
+alias tt='timetracker-cli'
+alias ttb='timetracker-cli begin'
+alias ttn='timetracker-cli note'
+alias ttne='timetracker-cli note -e'
+alias tts='timetracker-cli status'
+alias ttlt='timetracker-cli list --date today'
+alias ttly='timetracker-cli list --date yesterday'
+# ...
+```
+
+#### Shell Completions
+
+You can generate shell completions for your shell of choice. For example, to generate completions for `fish`:
+
+```bash
+timetracker-cli shell-completion fish > ~/.config/fish/completions/timetracker-cli.fish
+```
+
+Current options for shells include: `bash`, `elvish`, `fish`, `powershell` and `zsh`. This is because the default CLI uses [`clap`](https://crates.io/crates/clap) to parse arguments and [`clap_complete`](https://crates.io/crates/clap_complete) to generate completions.
+
 
 ## Getting Started
 
@@ -125,28 +201,7 @@ Options:
   -V, --version                    Print version
 ```
 
-### Shell aliases
-
-Personally I'd recommend using shell aliases for convenience, for example:
-
-```bash
-alias tt='timetracker-cli'
-alias ttl='timetracker-cli list'
-alias ttn='timetracker-cli note'
-alias tts='timetracker-cli status'
-alias ttb='timetracker-cli begin'
-# ...
-```
-
-### Shell Completions
-
-You can generate shell completions for your shell of choice. For example, to generate completions for `fish`:
-
-```bash
-timetracker-cli shell-completion fish > ~/.config/fish/completions/timetracker-cli.fish
-```
-
-Current options for shells include: `bash`, `elvish`, `fish`, `powershell` and `zsh`. This is because the default CLI uses [`clap`](https://crates.io/crates/clap) to parse arguments and [`clap_complete`](https://crates.io/crates/clap_complete) to generate completions.
+Some commands have arguments, either use `help` or `--help` to get detailed info about their flags, for example: `help list`
 
 ## Development
 
