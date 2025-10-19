@@ -5,8 +5,8 @@ use log::warn;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Error, ListOptions, ListResult, Result, SortOrder, StorageStrategy, TimeBox, TimeBoxNote,
-    TimeTrackerInitStrategy, TimeTrackingStore,
+    Error, ListOptions, ListResult, Result, SortOrder, TimeBox, TimeBoxNote,
+    TimeTrackerInitStrategy, TimeTrackerStorageStrategy, TimeTrackingStore,
 };
 
 /// Example Time Tracker intended for single-user local time tracking.
@@ -63,7 +63,7 @@ impl InMemoryTimeTracker {
 
     pub fn to_writer(
         &self,
-        strategy: &impl StorageStrategy,
+        strategy: &impl TimeTrackerStorageStrategy,
         writer: &mut impl std::io::Write,
     ) -> Result<()> {
         strategy.write(writer, self)
@@ -253,7 +253,7 @@ pub struct JsonStorageStrategy {
     pub pretty: bool,
 }
 
-impl StorageStrategy for JsonStorageStrategy {
+impl TimeTrackerStorageStrategy for JsonStorageStrategy {
     fn write(
         &self,
         writer: &mut impl std::io::Write,

@@ -4,7 +4,7 @@ use anyhow::{Context, anyhow, bail};
 use clap::CommandFactory;
 use log::{debug, warn};
 use timetracker::{
-    ListOptions, StorageStrategy, TimeBoxNote, TimeTrackingStore,
+    ListOptions, TimeBoxNote, TimeTrackerStorageStrategy, TimeTrackingStore,
     in_memory_tracker::InMemoryTimeTracker,
 };
 
@@ -78,7 +78,7 @@ pub fn handle_command_export(
 pub fn handle_command_init(
     storage_directory: &Path,
     storage_file: &Path,
-    strategy: &impl StorageStrategy,
+    strategy: &impl TimeTrackerStorageStrategy,
 ) -> anyhow::Result<()> {
     std::fs::create_dir_all(storage_directory)?;
     debug!("Created directories for: {}", storage_directory.display());

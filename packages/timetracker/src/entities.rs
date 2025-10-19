@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::Error;
 use crate::Result;
 
+/// Notes represent a chronological journal
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimeBoxNote {
     pub time: DateTime<Utc>,

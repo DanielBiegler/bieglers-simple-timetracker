@@ -2,7 +2,7 @@ use anyhow::anyhow;
 use chrono::{Local, Utc};
 use log::{debug, error};
 use std::{cmp, fs::File, path::Path};
-use timetracker::{StorageStrategy, TimeBox, TimeBoxNote, in_memory_tracker::InMemoryTimeTracker};
+use timetracker::{TimeTrackerStorageStrategy, TimeBox, TimeBoxNote, in_memory_tracker::InMemoryTimeTracker};
 
 pub fn generate_table(
     date_format: &str,
@@ -162,7 +162,7 @@ pub fn generate_csv_export(finished_time_boxes: &[TimeBox]) -> anyhow::Result<St
 pub fn save_json_to_disk(
     tracker: &InMemoryTimeTracker,
     path: &Path,
-    strategy: &impl StorageStrategy,
+    strategy: &impl TimeTrackerStorageStrategy,
 ) -> anyhow::Result<()> {
     let time = chrono::Utc::now().timestamp_micros();
 

@@ -43,7 +43,7 @@ pub trait TimeTrackingStore {
         Self: std::marker::Sized;
 }
 
-pub trait StorageStrategy {
+pub trait TimeTrackerStorageStrategy {
     fn write(&self, writer: &mut impl std::io::Write, store: &impl TimeTrackingStore)
     -> Result<()>;
 }
