@@ -9,6 +9,12 @@ Format:
 - `Fixed` for any bug fixes.
 - `Security` in case of vulnerabilities.
 
+## 0.2.1
+
+### Changed
+
+- Error message when running `status` while having no active time box is more helpful now.
+
 ## 0.2.0
 
 ### Added

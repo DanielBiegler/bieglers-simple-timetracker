@@ -28,7 +28,11 @@ pub fn handle_command_start(
 pub fn handle_command_status(tracker: &InMemoryTimeTracker) -> anyhow::Result<StoreModified> {
     match tracker.active()? {
         Some(tb) => println!("{}", generate_table_active(&tb)?),
-        None => return Err(anyhow!(timetracker::Error::NoActiveTimeBox)),
+        None => {
+            return Err(anyhow!(
+                "There is currently no active time box. You may begin a new one by using the `begin` command, see `timetracker-cli help begin` for more info"
+            ));
+        }
     }
 
     Ok(false)
