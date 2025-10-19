@@ -2,7 +2,9 @@ use anyhow::anyhow;
 use chrono::{Local, Utc};
 use log::{debug, error};
 use std::{cmp, fs::File, path::Path};
-use timetracker::{TimeTrackerStorageStrategy, TimeBox, TimeBoxNote, in_memory_tracker::InMemoryTimeTracker};
+use timetracker::{
+    TimeBox, TimeBoxNote, TimeTrackerStorageStrategy, in_memory_tracker::InMemoryTimeTracker,
+};
 
 pub fn generate_table(
     date_format: &str,

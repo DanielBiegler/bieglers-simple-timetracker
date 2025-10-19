@@ -1,11 +1,11 @@
-use clap::{Parser, Subcommand, ValueEnum};
-use std::path::PathBuf;
+use clap::Parser;
 use timetracker::{
-    ListOptions, SortOrder, TimeTrackingStore,
+    ListOptions, TimeTrackingStore,
     in_memory_tracker::{InMemoryTimeTracker, JsonFileLoadingStrategy, JsonStorageStrategy},
 };
 
 use crate::{
+    args::{Args, Commands},
     handle_commands::{
         handle_command_amend, handle_command_cancel, handle_command_clear, handle_command_end,
         handle_command_export, handle_command_init, handle_command_list, handle_command_note,
@@ -15,116 +15,9 @@ use crate::{
     helpers::save_json_to_disk,
 };
 
+mod args;
 mod handle_commands;
 mod helpers;
-
-type StoreModified = bool;
-
-#[derive(Debug, Clone, ValueEnum)]
-enum ExportStrategy {
-    /// Default output for sanity checking when debugging
-    Debug,
-    /// Comma separated values, useful for importing into worksheets/tables
-    Csv,
-    /// JavaScript Object Notation, useful for as an intermediary for example `jq`
-    Json,
-}
-
-#[derive(Debug, Clone, ValueEnum)]
-enum ListOrder {
-    Ascending,
-    Descending,
-}
-
-impl From<ListOrder> for SortOrder {
-    fn from(value: ListOrder) -> Self {
-        match value {
-            ListOrder::Ascending => SortOrder::Ascending,
-            ListOrder::Descending => SortOrder::Descending,
-        }
-    }
-}
-
-#[derive(Debug, Clone, ValueEnum)]
-enum OutputJsonFormat {
-    Compact,
-    Pretty,
-}
-
-#[derive(Subcommand, Debug)]
-enum Commands {
-    /// Initialize a new file for time tracking. Does not overwrite if the file already exists.
-    Init {},
-    /// Begin working on something. Creates a new active time box if there is none.
-    Begin { description: String },
-    /// Add a note to the active time box.
-    Note {
-        /// End the time box after adding the note.
-        #[arg(short, long, default_value_t = false)]
-        end: bool,
-        description: String,
-    },
-    /// Changes the description of the active time box.
-    Amend { description: String },
-    /// End the active time box.
-    End {},
-    /// Makes the last finished time box active again. Useful if you prematurely finish. We've all been there, bud.
-    Resume {},
-
-    /// Cancels i.e. removes the active time box.
-    Cancel {},
-    /// Clears i.e. removes all finished time boxes. Does not modify the store if there is a active time box.
-    Clear {},
-
-    /// Print human readable information about the active time box.
-    Status {},
-    /// Print human readable information about the finished time boxes.
-    List {
-        /// Lists all finished time boxes.
-        #[arg(short, long, default_value_t = false)]
-        all: bool,
-        /// Used for pagination
-        #[arg(short, long, default_value_t = 0)]
-        page: usize,
-        /// Used for pagination
-        #[arg(short, long, default_value_t = 25)]
-        limit: usize,
-        /// Order of the listed time boxes.
-        /// Descending means the latest time boxes come first.
-        #[arg(value_enum, default_value_t = ListOrder::Ascending)]
-        order: ListOrder,
-    },
-    /// Generate output for integrating into other tools.
-    Export {
-        #[arg(value_enum, default_value_t = ExportStrategy::Csv)]
-        strategy: ExportStrategy,
-    },
-    /// Generate shell-completion
-    ShellCompletion { shell: clap_complete::aot::Shell },
-}
-
-/// Purposefully Simple Personal Time-Tracker made by (and mainly for) Daniel Biegler https://www.danielbiegler.de
-#[derive(Parser, Debug)]
-#[command(version, about)]
-struct Args {
-    /// Name of the output folder. Persistence will be inside this directory.
-    #[arg(short, long, default_value = ".bieglers-timetracker")]
-    output: PathBuf,
-
-    #[arg(short, long, value_enum, default_value_t = OutputJsonFormat::Pretty)]
-    json_format: OutputJsonFormat,
-
-    /// Level of feedback for your inputs. Gets output into `stderr` so you can still have logs and output into a file normally.
-    ///
-    /// Environment variable `$RUST_LOG` takes precedence and overwrites this argument.
-    ///
-    /// For possible values see https://docs.rs/env_logger/0.11.8/env_logger/index.html
-    #[arg(long, default_value = "info")]
-    log_level: String,
-
-    #[command(subcommand)]
-    command: Commands,
-}
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
@@ -135,11 +28,11 @@ fn main() -> anyhow::Result<()> {
 
     let mut tracker: InMemoryTimeTracker = match args.command {
         Commands::Init {} => {
-            let strategy = match args.json_format {
-                OutputJsonFormat::Compact => JsonStorageStrategy { pretty: false },
-                OutputJsonFormat::Pretty => JsonStorageStrategy { pretty: true },
-            };
-            return handle_command_init(&args.output, &storage_path, &strategy);
+            return handle_command_init(
+                &args.output,
+                &storage_path,
+                &args.json_format.into() as &JsonStorageStrategy,
+            );
         }
         _ => InMemoryTimeTracker::init(&JsonFileLoadingStrategy {
             path: &storage_path,
@@ -165,10 +58,13 @@ fn main() -> anyhow::Result<()> {
             page,
             limit,
             order,
+            date,
         } => {
             let options = ListOptions::new().order(order.into());
             if all {
                 handle_command_list(&tracker, &options.take(usize::MAX))?
+            } else if let Some(f) = date {
+                handle_command_list(&tracker, &options.filter(f))?
             } else {
                 handle_command_list(&tracker, &options.page(page, limit))?
             }
@@ -177,12 +73,11 @@ fn main() -> anyhow::Result<()> {
     };
 
     if is_dirty {
-        let strategy = match args.json_format {
-            OutputJsonFormat::Compact => JsonStorageStrategy { pretty: false },
-            OutputJsonFormat::Pretty => JsonStorageStrategy { pretty: true },
-        };
-
-        save_json_to_disk(&tracker, &storage_path, &strategy)?
+        save_json_to_disk(
+            &tracker,
+            &storage_path,
+            &args.json_format.into() as &JsonStorageStrategy,
+        )?
     }
 
     Ok(())

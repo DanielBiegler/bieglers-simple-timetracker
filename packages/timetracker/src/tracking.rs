@@ -1,3 +1,5 @@
+use chrono::NaiveDate;
+
 use crate::{TimeBox, error::Error};
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
@@ -58,11 +60,18 @@ pub enum SortOrder {
     Descending,
 }
 
+#[derive(Debug, Clone)]
+pub enum ListFilter {
+    Date(NaiveDate),
+    Range { from: NaiveDate, to: NaiveDate },
+}
+
 #[derive(Debug)]
 pub struct ListOptions {
     pub skip: usize,
     pub take: usize,
     pub order: SortOrder,
+    pub filter: Option<ListFilter>,
 }
 
 impl ListOptions {
@@ -71,6 +80,7 @@ impl ListOptions {
             skip: 0,
             take: 25,
             order: SortOrder::Ascending,
+            filter: None,
         }
     }
 
@@ -92,6 +102,11 @@ impl ListOptions {
     pub fn page(mut self, page: usize, page_size: usize) -> Self {
         self.skip = page * page_size;
         self.take = page_size;
+        self
+    }
+
+    pub fn filter(mut self, filter: ListFilter) -> Self {
+        self.filter = Some(filter);
         self
     }
 }

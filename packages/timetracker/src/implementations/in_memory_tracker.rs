@@ -5,7 +5,7 @@ use log::warn;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Error, ListOptions, ListResult, Result, SortOrder, TimeBox, TimeBoxNote,
+    Error, ListFilter, ListOptions, ListResult, Result, SortOrder, TimeBox, TimeBoxNote,
     TimeTrackerInitStrategy, TimeTrackerStorageStrategy, TimeTrackingStore,
 };
 
@@ -90,13 +90,27 @@ impl TimeTrackingStore for InMemoryTimeTracker {
     }
 
     fn finished(&self, options: &ListOptions) -> Result<ListResult> {
-        let mut items: Vec<TimeBox> = self
-            .finished
-            .iter()
-            .skip(options.skip)
-            .take(options.take)
-            .cloned()
-            .collect();
+        let mut items: Vec<TimeBox> = match options.filter.as_ref() {
+            Some(filter) => self
+                .finished
+                .iter()
+                .filter(|&tb| {
+                    let start = tb.time_start().unwrap_or_default().date_naive();
+                    match filter {
+                        ListFilter::Date(date) => start == *date,
+                        ListFilter::Range { from, to } => start >= *from && start <= *to,
+                    }
+                })
+                .cloned()
+                .collect(),
+            None => self
+                .finished
+                .iter()
+                .skip(options.skip)
+                .take(options.take)
+                .cloned()
+                .collect(),
+        };
 
         match options.order {
             SortOrder::Ascending => items.sort_by(|a, b| {

@@ -9,9 +9,11 @@ use timetracker::{
 };
 
 use crate::{
-    Args, ExportStrategy, StoreModified,
+    args::{Args, ExportStrategy},
     helpers::{generate_csv_export, generate_table, generate_table_active},
 };
+
+type StoreModified = bool;
 
 pub fn handle_command_start(
     tracker: &mut InMemoryTimeTracker,
