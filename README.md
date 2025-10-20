@@ -17,6 +17,18 @@ For the full set of features see the CLI-section further down below.
 
 ![example usage animation](./assets/usage-demo.svg)
 
+## What is this and why?
+
+Fundamentally, I wanted a basic journal with chronological timestamps that simply gets out of my way. I looked up some time tracking utilities and they tend to bloat up in scope to become project management suites and or business tools.
+
+**I want none of that. I want simplicity.**
+
+`git` itself does basically what I want already, record structured messages with timestamps, store them locally and let me display them chronologically with `log --pretty=format:...` in a simple layout.
+
+You can come up with shell scripts and aliases that use `--git-dir` to make your own system for storage per project/task/whatever and `awk` to parse out timestamps etc. but this does not sit right with me, harping about simplicity and then hodgepodging scripts together to inevitably become frustrated because shell scripting sucks. There I said it.
+
+I enjoy writing Rust code so here we are. Simple time tracking that leaves you alone.
+
 ## How To Use Bieglers TimeTracker
 
 This timetracker specifically forces you to only work on one "time-box" at a time. This is to prevent context switching, help you focus on the task at hand and if you adhere to it actually give you a real sense of how long something took.
