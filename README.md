@@ -1,14 +1,21 @@
 # Bieglers TimeTracker
 
-Purposefully Simple Personal Time-Tracker made by *(and mainly for)* Daniel Biegler https://www.danielbiegler.de
+Purposefully simple & personal time-tracker that integrates well into a programmers daily routine. Made by *(and mainly for)* [Daniel Biegler](https://www.danielbiegler.de) 
 
 ## TL;DR Features
 
-- Start, stop, and list tasks
+- Start, stop, and list time boxes
 - Document progress via notes
-- Track time spent on each task
+- Track time spent on each task/day/week/..
 - Export CSV, JSON
-- Persistent storage of tasks per project
+- Simple storage of tracked time as text based files
+- ...
+
+For the full set of features see the CLI-section further down below.
+
+### Quick Demo: Example usage
+
+![example usage animation](./assets/usage-demo.svg)
 
 ## How To Use Bieglers TimeTracker
 
@@ -34,7 +41,13 @@ tt begin "Investigate issue #123"
 tt note "Identified root cause, ..."
 ```
 
-4. Finish this time block
+4. Inspect your active time box
+
+```bash
+tt status
+```
+
+5. Finish this time block
 
 ```bash
 tt note "Fixed it and pushed commits"
