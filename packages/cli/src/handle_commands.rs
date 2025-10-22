@@ -4,7 +4,7 @@ use anyhow::{Context, anyhow, bail};
 use clap::CommandFactory;
 use log::{debug, warn};
 use timetracker::{
-    ListOptions, TimeBoxNote, TimeTrackerStorageStrategy, TimeTrackingStore,
+    ListOptions, TimeTrackerStorageStrategy, TimeTrackingStore,
     in_memory_tracker::InMemoryTimeTracker,
 };
 
@@ -20,17 +20,22 @@ pub fn handle_command_start(
     description: &str,
 ) -> anyhow::Result<StoreModified> {
     tracker
-    .begin(description)
-    .context("Unable to begin a new time box because tracking is already active. Finish your active time box before beginning a new one.")
-    .map(|_| Ok(true))?
+        .begin(description)
+        .context(
+            "Unable to begin a new time box because tracking is already active. \
+            Finish your active time box before beginning a new one.",
+        )
+        .map(|_| Ok(true))?
 }
 
 pub fn handle_command_status(tracker: &InMemoryTimeTracker) -> anyhow::Result<StoreModified> {
     match tracker.active()? {
-        Some(tb) => println!("{}", generate_table_active(&tb)?),
+        Some(tb) => println!("{}", generate_table_active(tb)?),
         None => {
             return Err(anyhow!(
-                "There is currently no active time box. You may begin a new one by using the `begin` command, see `timetracker-cli help begin` for more info"
+                "There is currently no active time box. \
+                You may begin a new one by using the `begin` command, \
+                see `timetracker-cli help begin` for more info"
             ));
         }
     }
@@ -74,7 +79,7 @@ pub fn handle_command_export(
     if let Some(tb) = tracker.active()? {
         warn!(
             "There is an active time box:\n{}",
-            generate_table_active(&tb)?
+            generate_table_active(tb)?
         )
     }
 
@@ -162,7 +167,7 @@ pub fn handle_command_list(
     tracker: &InMemoryTimeTracker,
     options: &ListOptions,
 ) -> anyhow::Result<StoreModified> {
-    let finished = tracker.finished(options)?;
+    let mut finished = tracker.finished(options)?;
     let active = tracker.active()?;
 
     if finished.items.is_empty() {
@@ -170,22 +175,17 @@ pub fn handle_command_list(
         return Ok(false);
     }
 
-    let hours = finished.items.iter().fold(0.0f64, |acc, task| {
-        acc + task.duration_in_hours().unwrap_or_default()
+    let hours = finished.items.iter().fold(0.0f64, |acc, tb| {
+        acc + tb.duration_in_hours().unwrap_or_default()
     });
     let sum_col_label = format!("total {hours:.2}h");
-    let note_blocks: Vec<&[TimeBoxNote]> = finished
-        .items
-        .iter()
-        .map(|task| task.notes.as_slice())
-        .collect();
 
     let table = generate_table(
         "%Y-%m-%d %H:%M",
         "At",
         "Description",
         &sum_col_label,
-        &note_blocks,
+        finished.items.as_mut_slice(),
     );
 
     println!("{table}");
@@ -193,7 +193,7 @@ pub fn handle_command_list(
     if let Some(active) = active {
         warn!(
             "There is a pending task:\n{}",
-            generate_table_active(&active)?
+            generate_table_active(active)?
         )
     }
 

@@ -2,26 +2,34 @@ use anyhow::anyhow;
 use chrono::{Local, Utc};
 use log::{debug, error};
 use std::{cmp, fs::File, path::Path};
-use timetracker::{
-    TimeBox, TimeBoxNote, TimeTrackerStorageStrategy, in_memory_tracker::InMemoryTimeTracker,
-};
+use timetracker::{TimeBox, TimeTrackerStorageStrategy, in_memory_tracker::InMemoryTimeTracker};
+
+/// TODO: Make it dynamic in the future if the need comes up
+const TEXT_WRAP_COL: usize = 50;
 
 pub fn generate_table(
     date_format: &str,
     date_col_label: &str,
     description_col_label: &str,
     sum_col_label: &str,
-    note_blocks: &[&[TimeBoxNote]],
+    time_boxes: &mut [TimeBox],
 ) -> String {
     let mut output = String::with_capacity(1024);
+
+    time_boxes.iter_mut().for_each(|block| {
+        block
+            .notes
+            .iter_mut()
+            .for_each(|note| textwrap::fill_inplace(&mut note.description, TEXT_WRAP_COL));
+    });
 
     let date_format_expanded_len = Utc::now().format(date_format).to_string().len();
     let date_col_max_len = cmp::max(date_col_label.len(), date_format_expanded_len);
     let description_col_max_len = cmp::max(
         description_col_label.len(),
-        note_blocks // The longest line of any description
+        time_boxes // The longest line of any description
             .iter()
-            .flat_map(|&block| block.iter())
+            .flat_map(|block| block.notes.iter())
             .map(|note| note.description.lines().map(|l| l.len()).max().unwrap_or(0))
             .max()
             .unwrap(), // We may assert there is one
@@ -48,7 +56,7 @@ pub fn generate_table(
     ));
 
     // Each Row
-    note_blocks.iter().enumerate().for_each(|(index, block)| {
+    time_boxes.iter().enumerate().for_each(|(index, block)| {
         // Separator line
         if index > 0 {
             output.push_str(&format!(
@@ -57,7 +65,7 @@ pub fn generate_table(
             ));
         }
 
-        block.iter().for_each(|note| {
+        block.notes.iter().for_each(|note| {
             let col_date = note
                 .time
                 .with_timezone(&Local)
@@ -102,18 +110,17 @@ pub fn generate_table(
     output
 }
 
-pub fn generate_table_active(time_box: &TimeBox) -> anyhow::Result<String> {
+pub fn generate_table_active(time_box: TimeBox) -> anyhow::Result<String> {
     let hours = time_box.duration_in_hours()?;
     let hours_active = time_box.duration_active_in_hours()?;
     let sum_col_label = format!("tasks {hours:.2}h, {hours_active:.2}h active");
-    let note_blocks = [time_box.notes.as_slice()];
 
     Ok(generate_table(
         "%Y-%m-%d %H:%M",
         "At",
         "Description",
         &sum_col_label,
-        &note_blocks,
+        &mut [time_box],
     ))
 }
 
