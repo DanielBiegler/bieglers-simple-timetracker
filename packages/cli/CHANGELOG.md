@@ -9,6 +9,12 @@ Format:
 - `Fixed` for any bug fixes.
 - `Security` in case of vulnerabilities.
 
+## 0.3.0
+
+### Added
+
+- Automatic line wrapping for ascii tables when showing active and finished time boxes
+
 ## 0.2.1
 
 ### Changed
