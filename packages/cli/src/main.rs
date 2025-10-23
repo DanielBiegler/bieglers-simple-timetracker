@@ -1,3 +1,4 @@
+use anyhow::Context;
 use clap::Parser;
 use timetracker::{
     ListOptions, TimeTrackingStore,
@@ -36,6 +37,14 @@ fn main() -> anyhow::Result<()> {
         }
         _ => InMemoryTimeTracker::init(&JsonFileLoadingStrategy {
             path: &storage_path,
+        })
+        .with_context(|| {
+            format!(
+                "Failed to load tracked time. \
+                Try initializing the directory first via the `init` command or fix malformed fields. \
+                Tried to read data from path: \"{}\"",
+                storage_path.display()
+            )
         })?,
     };
 

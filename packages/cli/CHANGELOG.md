@@ -9,6 +9,12 @@ Format:
 - `Fixed` for any bug fixes.
 - `Security` in case of vulnerabilities.
 
+## 0.3.1
+
+### Changed
+
+- Improved error message for when the store fails to load, for example missing storage file or deserialization.
+
 ## 0.3.0
 
 ### Added
